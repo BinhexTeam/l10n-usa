@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- View res.partner.bank form -->
+    <record id="view_res_partner_bank_form" model="ir.ui.view">
+        <field name="name">view.res.partner.bank.form</field>
+        <field name="model">res.partner.bank</field>
+        <field name="inherit_id" ref="base.view_partner_bank_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='active']" position="after">
+                <field name="billcom_funding_account_id" widget="many2one" options="{'no_create': True}" domain="[('active', '=', True)]"/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>
