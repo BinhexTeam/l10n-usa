@@ -191,6 +191,20 @@ Failed to sync vendor to Bill.com:
 • Tax Id: must match pattern [0-9]{2}-[0-9]{7}
 ```
 
+### Scenario 4: Duplicate Record Error (422)
+
+**User Action**: Try to sync invoice with duplicate number → Sync
+
+**User Sees** (Popup):
+
+```
+Failed to sync document to Bill.com:
+
+• Duplicate invoice number for 00e02RCMLAFOLAWHwdj5.
+```
+
+**Note**: The system immediately shows this error without retrying (no 5-second delays)
+
 ## Error Format Examples
 
 ### Single Field Error
@@ -219,12 +233,18 @@ Failed to sync vendor to Bill.com:
 • Discount Percentage: must be between 0 and 100
 ```
 
+### Business Logic Error (422)
+
+```
+• Duplicate invoice number for 00e02RCMLAFOLAWHwdj5.
+```
+
 ## Technical Implementation Details
 
 ### Error Flow
 
-1. **API Request Fails** → HTTP 400 error with JSON body
-2. **No Retry for 400/404** → `_should_retry()` returns `False` for validation errors
+1. **API Request Fails** → HTTP 400/404/422 error with JSON body
+2. **No Retry for Client Errors** → `_should_retry()` returns `False` for validation errors
 3. **Exception Raised** → `requests.HTTPError` with response (immediately, no retries)
 4. **Service Catches** → `except Exception as e:`
 5. **Extract Details** → `_extract_friendly_error(e)`
@@ -235,12 +255,13 @@ Failed to sync vendor to Bill.com:
 
 ### No Retry for Client Errors
 
-**File**: `models/billcom_service_abstract.py` (lines 693-704)
+**File**: `models/billcom_service_abstract.py` (lines 697-709)
 
-Client errors (400, 404) are NOT retried because:
+Client errors (400, 404, 422) are NOT retried because:
 
 - **400 Bad Request**: Validation errors - data is invalid and won't change by retrying
 - **404 Not Found**: Resource doesn't exist - won't appear by retrying
+- **422 Unprocessable Entity**: Business logic validation failed (e.g., duplicate invoice number)
 
 **Errors that ARE retried**:
 

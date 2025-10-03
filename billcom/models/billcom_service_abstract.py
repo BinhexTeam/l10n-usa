@@ -512,6 +512,7 @@ class BillcomServiceAbstract(models.AbstractModel):
                 401: "Unauthorized - Authentication failed or session expired",
                 403: "Forbidden - Insufficient permissions or session invalid",
                 404: "Not Found - Requested resource does not exist",
+                422: "Unprocessable Entity - Business logic validation failed",
                 429: "Rate Limit Exceeded - Too many API requests",
                 500: "Internal Server Error - Bill.com API experiencing issues",
                 502: "Bad Gateway - Bill.com API temporarily unavailable",
@@ -636,9 +637,15 @@ class BillcomServiceAbstract(models.AbstractModel):
                     for error in error_details:
                         if isinstance(error, dict) and error.get("message"):
                             msg = error["message"]
-                            # Make field names more readable
-                            # Example: "email: must not be blank" -> "Email is required"
-                            if ":" in msg:
+                            error_code = error.get("code")
+
+                            # Handle specific error codes
+                            if error_code == "BDC_1171":
+                                # Duplicate invoice/bill number
+                                messages.append(msg)
+                            elif ":" in msg:
+                                # Make field names more readable
+                                # Example: "email: must not be blank" -> "Email is required"
                                 field, requirement = msg.split(":", 1)
                                 field = field.strip().replace("_", " ").title()
                                 requirement = requirement.strip()
@@ -694,13 +701,14 @@ class BillcomServiceAbstract(models.AbstractModel):
         if retry_count >= max_retries:
             return False
 
-        # Don't retry on client errors (400, 404) - these are validation/data errors
+        # Don't retry on client errors (400, 404, 422) - these are validation/data errors
         # that won't be fixed by retrying
         if hasattr(exception, "response") and exception.response is not None:
             status_code = exception.response.status_code
             # 400 = Bad Request (validation errors)
             # 404 = Not Found (resource doesn't exist)
-            if status_code in (400, 404):
+            # 422 = Unprocessable Entity (business logic validation errors, e.g., duplicate records)
+            if status_code in (400, 404, 422):
                 _logger.info(
                     "Not retrying request - HTTP %s is a client error that won't be fixed by retrying",
                     status_code,
