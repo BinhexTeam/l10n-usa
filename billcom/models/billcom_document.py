@@ -463,6 +463,59 @@ class BillcomDocument(models.Model):
             ) from e
 
     @api.model
+    def create_from_attachment(self, attachment):
+        """Create a billcom.document from an ir.attachment
+
+        Args:
+            attachment: ir.attachment record
+
+        Returns:
+            billcom.document: Created document record
+        """
+        if not attachment.res_model == 'account.move':
+            raise UserError(
+                _("Attachment must be linked to a vendor bill (account.move)")
+            )
+
+        bill = self.env['account.move'].browse(attachment.res_id)
+        if not bill.exists() or bill.move_type != 'in_invoice':
+            raise UserError(
+                _("Attachment must be linked to a valid vendor bill")
+            )
+
+        # Check if document already exists for this attachment
+        existing = self.search([
+            ('attachment_id', '=', attachment.id),
+            ('bill_id', '=', bill.id)
+        ], limit=1)
+
+        if existing:
+            _logger.info(
+                "Document already exists for attachment %d: %s",
+                attachment.id,
+                existing.name,
+            )
+            return existing
+
+        # Create new document
+        vals = {
+            'name': attachment.name,
+            'bill_id': bill.id,
+            'file_data': attachment.datas,
+            'attachment_id': attachment.id,
+            'upload_status': 'pending',
+        }
+
+        document = self.create(vals)
+        _logger.info(
+            "Created document from attachment %d: %s",
+            attachment.id,
+            document.name,
+        )
+
+        return document
+
+    @api.model
     def sync_documents_from_billcom(self, bill):
         """Sync all documents for a bill from Bill.com
 
@@ -510,8 +563,26 @@ class BillcomDocument(models.Model):
                     existing.write(vals)
                     _logger.info("Updated document %s", doc_id)
                 else:
-                    self.create(vals)
+                    document = self.create(vals)
                     _logger.info("Created document %s", doc_id)
+
+                    # Auto-download and create attachment for newly synced documents
+                    try:
+                        if document.download_link:
+                            file_data = service._download_document(document.download_link)
+                            if file_data:
+                                file_data_encoded = base64.b64encode(file_data)
+                                document.write({'file_data': file_data_encoded})
+                                document._create_or_update_attachment(file_data_encoded)
+                                _logger.info(
+                                    "Auto-downloaded and attached document %s (%d bytes)",
+                                    doc_id,
+                                    len(file_data),
+                                )
+                    except Exception as e:
+                        _logger.warning(
+                            "Failed to auto-download document %s: %s", doc_id, str(e)
+                        )
 
                 synced_count += 1
 

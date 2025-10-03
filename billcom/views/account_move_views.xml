@@ -36,6 +36,18 @@
                             />
                         </group>
                     </group>
+                    <group attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}">
+                        <group>
+                            <button
+                                name="button_sync_attachments_to_billcom"
+                                string="Create Documents from Attachments"
+                                type="object"
+                                class="btn-secondary"
+                                icon="fa-paperclip"
+                                help="Create Bill.com document records from existing attachments on this bill"
+                            />
+                        </group>
+                    </group>
                     <separator string="Bill.com Documents" attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}" />
                     <field
                         name="billcom_document_ids"

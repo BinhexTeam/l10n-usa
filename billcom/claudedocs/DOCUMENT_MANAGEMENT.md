@@ -548,7 +548,255 @@ For bills with many documents:
 - Use `page` parameter for next page
 - Implement if needed in future
 
-## Future Enhancements
+## Integration with ir.attachment
+
+### Overview
+
+The `billcom.document` model is now fully integrated with Odoo's native `ir.attachment` system, enabling:
+- Automatic creation of attachments when downloading from Bill.com
+- Upload of existing attachments to Bill.com
+- Two-way synchronization between attachments and documents
+
+### Attachment Creation (Download from Bill.com)
+
+**When syncing or downloading documents from Bill.com**, the system automatically:
+
+1. Downloads file content from Bill.com
+2. Stores it in `billcom.document.file_data`
+3. Creates/updates `ir.attachment` record:
+   - Links to bill (`res_model='account.move'`, `res_id=bill.id`)
+   - Sets proper mimetype based on filename
+   - Updates description with Bill.com ID
+
+**Implementation**: `models/billcom_document.py:364`
+
+```python
+def _create_or_update_attachment(self, file_data_encoded):
+    """Create or update ir.attachment for this document"""
+    import mimetypes
+    mimetype = mimetypes.guess_type(self.name)[0] or 'application/octet-stream'
+
+    attachment_vals = {
+        'name': self.name,
+        'datas': file_data_encoded,
+        'res_model': 'account.move',
+        'res_id': self.bill_id.id,
+        'mimetype': mimetype,
+        'description': f'Bill.com Document: {self.billcom_id or "pending"}',
+    }
+
+    if self.attachment_id:
+        self.attachment_id.write(attachment_vals)
+    else:
+        attachment = self.env['ir.attachment'].create(attachment_vals)
+        self.write({'attachment_id': attachment.id})
+```
+
+**Called by**:
+- `button_download_from_billcom()` - Manual download
+- `sync_documents_from_billcom()` - Automatic sync (NEW)
+
+### Document Creation from Existing Attachments
+
+**New Feature**: Convert existing `ir.attachment` records to `billcom.document` records
+
+**Method**: `models/billcom_document.py:466`
+
+```python
+@api.model
+def create_from_attachment(self, attachment):
+    """Create a billcom.document from an ir.attachment"""
+    # Validates attachment is linked to vendor bill
+    # Checks if document already exists
+    # Creates new document with pending upload status
+    # Links to original attachment
+```
+
+**Validation**:
+- Attachment must be linked to `account.move` (vendor bill)
+- Bill must be `move_type='in_invoice'`
+- Prevents duplicate document creation
+
+**Button**: `models/account_move.py:305`
+
+```python
+def button_sync_attachments_to_billcom(self):
+    """Create billcom.document records from existing ir.attachment records"""
+    # Finds all attachments for this bill
+    # Creates document for each attachment
+    # Posts summary to chatter
+    # Shows notification with count
+```
+
+**UI Location**: Bill.com Integration tab → "Create Documents from Attachments" button
+
+### Workflow Examples
+
+#### Example 1: Sync Documents from Bill.com (Auto-Creates Attachments)
+
+**Scenario**: Documents uploaded via Bill.com web interface
+
+1. User syncs bill from Bill.com (webhook or manual)
+2. System calls `sync_documents_from_billcom(bill)`
+3. For each document in Bill.com:
+   - Creates `billcom.document` record
+   - **NEW**: Auto-downloads file content
+   - **NEW**: Creates `ir.attachment` automatically
+4. **Result**:
+   - Documents visible in Bill.com Documents section
+   - Attachments visible in Odoo's attachment sidebar
+   - Files ready for download in Odoo
+
+**Code**: `models/billcom_document.py:516-532`
+
+```python
+# Auto-download and create attachment for newly synced documents
+try:
+    if document.download_link:
+        file_data = service._download_document(document.download_link)
+        if file_data:
+            file_data_encoded = base64.b64encode(file_data)
+            document.write({'file_data': file_data_encoded})
+            document._create_or_update_attachment(file_data_encoded)
+except Exception as e:
+    _logger.warning("Failed to auto-download document %s: %s", doc_id, str(e))
+```
+
+#### Example 2: Upload Existing Attachments to Bill.com
+
+**Scenario**: Bill already has attachments in Odoo, need to upload to Bill.com
+
+1. Open vendor bill in Odoo
+2. Go to Bill.com Integration tab
+3. Click "Create Documents from Attachments" button
+4. System finds all attachments for this bill
+5. Creates `billcom.document` record for each
+6. **Result**:
+   - New documents appear in list with "pending" status
+   - Click "Upload" on each to send to Bill.com
+   - Chatter message: "Created 3 new Bill.com document(s) from 3 attachment(s)"
+
+**Example**:
+```
+Bill has 3 attachments:
+- invoice.pdf (uploaded by user)
+- receipt.jpg (scanned via mobile)
+- contract.pdf (from email)
+
+After clicking "Create Documents from Attachments":
+- 3 billcom.document records created
+- Each linked to its source attachment
+- Each in "pending" status
+- Ready to upload to Bill.com
+```
+
+#### Example 3: Two-Way Sync
+
+**Scenario**: Document downloaded from Bill.com, then modified locally
+
+1. Sync document from Bill.com → creates attachment
+2. User downloads file from Odoo attachment
+3. User modifies file locally
+4. User uploads modified file to same attachment
+5. System updates `billcom.document.file_data` (planned enhancement)
+6. User clicks "Upload to Bill.com" to sync changes
+
+### Database Schema Updates
+
+**New field in billcom.document**:
+```sql
+ALTER TABLE billcom_document
+ADD COLUMN attachment_id INTEGER REFERENCES ir_attachment(id);
+```
+
+**Relationship**:
+- `billcom.document.attachment_id` → `ir.attachment.id` (Many2one)
+- One document can link to one attachment
+- One attachment can have multiple documents (if bill is duplicated)
+
+### UI Changes
+
+**Bill Form View** (`views/account_move_views.xml:39-50`):
+
+Added button above document list:
+```xml
+<button
+    name="button_sync_attachments_to_billcom"
+    string="Create Documents from Attachments"
+    type="object"
+    class="btn-secondary"
+    icon="fa-paperclip"
+    help="Create Bill.com document records from existing attachments on this bill"
+/>
+```
+
+**Document List** (no changes):
+- Still shows upload/download buttons
+- Status badges remain same
+- Inline editing preserved
+
+### Testing Recommendations
+
+#### Test 1: Auto-Create Attachment on Sync
+
+1. Upload document via Bill.com web interface
+2. Sync bill from Bill.com in Odoo
+3. ✅ Verify `billcom.document` created
+4. ✅ Verify `ir.attachment` created and linked
+5. ✅ Verify file downloadable from attachment sidebar
+6. ✅ Verify mimetype correct
+
+#### Test 2: Create Documents from Existing Attachments
+
+1. Create vendor bill in Odoo
+2. Upload 2 files via attachment sidebar
+3. Click "Create Documents from Attachments"
+4. ✅ Verify 2 `billcom.document` records created
+5. ✅ Verify both linked to attachments
+6. ✅ Verify both in "pending" status
+7. Click "Upload" on each document
+8. ✅ Verify upload to Bill.com succeeds
+
+#### Test 3: Prevent Duplicate Documents
+
+1. Create attachment on bill
+2. Click "Create Documents from Attachments" → 1 document created
+3. Click button again
+4. ✅ Verify no duplicate document created
+5. ✅ Verify chatter message shows "0 new, 1 existing"
+
+#### Test 4: Attachment Update on Download
+
+1. Create document and upload to Bill.com
+2. Delete `file_data` from document
+3. Delete linked `ir.attachment`
+4. Click "Download from Bill.com"
+5. ✅ Verify file downloaded
+6. ✅ Verify new `ir.attachment` created
+7. ✅ Verify attachment linked to document
+
+#### Test 5: Validation Errors
+
+1. Try to create document from attachment linked to customer invoice
+2. ✅ Verify error: "Attachment must be linked to a vendor bill"
+3. Try with attachment linked to different model
+4. ✅ Verify error: "Attachment must be linked to a vendor bill"
+
+### Performance Considerations
+
+**Auto-Download on Sync**:
+- Downloads happen during sync (may slow down sync)
+- Each document downloaded individually
+- Failed downloads logged but don't stop sync
+- Consider batch download for bills with many documents
+
+**Attachment Creation**:
+- Creates one `ir.attachment` per document
+- Uses Odoo's standard attachment storage (filestore or database)
+- Mimetype guessed from filename
+- No impact on Bill.com API quota
+
+### Future Enhancements
 
 ### Suggested Improvements
 
@@ -560,6 +808,8 @@ For bills with many documents:
 6. **Document Types**: Categorize documents (invoice, receipt, contract)
 7. **Version Control**: Track document versions
 8. **Approval Workflow**: Require approval before upload
+9. **Batch Download**: Download all documents for bill in one operation (RECOMMENDED)
+10. **Attachment Monitor**: Watch for attachment changes and sync to Bill.com automatically
 
 ## Troubleshooting
 

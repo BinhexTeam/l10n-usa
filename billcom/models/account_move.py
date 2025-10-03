@@ -302,6 +302,81 @@ class AccountMove(models.Model):
     #             except Exception as e:
     #                 _logger.error("Error syncing document to Bill.com: %s", str(e))
 
+    def button_sync_attachments_to_billcom(self):
+        """Create billcom.document records from existing ir.attachment records
+
+        This button finds all attachments linked to this bill and creates
+        corresponding billcom.document records that can be uploaded to Bill.com
+        """
+        self.ensure_one()
+
+        if self.move_type != 'in_invoice':
+            from odoo.exceptions import UserError
+            raise UserError(_("This action is only available for vendor bills"))
+
+        # Find all attachments for this bill
+        attachments = self.env['ir.attachment'].search([
+            ('res_model', '=', 'account.move'),
+            ('res_id', '=', self.id),
+        ])
+
+        if not attachments:
+            return {
+                "type": "ir.actions.client",
+                "tag": "display_notification",
+                "params": {
+                    "title": _("No Attachments Found"),
+                    "message": _("This bill has no attachments to sync"),
+                    "type": "info",
+                    "sticky": False,
+                },
+            }
+
+        # Create billcom.document records for each attachment
+        created_count = 0
+        existing_count = 0
+
+        for attachment in attachments:
+            try:
+                document = self.env['billcom.document'].create_from_attachment(attachment)
+                if document:
+                    # Check if it was newly created or already existed
+                    if document.create_date == fields.Datetime.now():
+                        created_count += 1
+                    else:
+                        existing_count += 1
+            except Exception as e:
+                _logger.warning(
+                    "Failed to create document from attachment %d: %s",
+                    attachment.id,
+                    str(e)
+                )
+
+        # Post to chatter
+        if created_count > 0 or existing_count > 0:
+            self.message_post(
+                body=f"<p><strong>Attachments Synced to Bill.com Documents</strong></p>"
+                f"<ul>"
+                f"<li>New documents created: {created_count}</li>"
+                f"<li>Documents already existed: {existing_count}</li>"
+                f"<li>Total attachments: {len(attachments)}</li>"
+                f"</ul>"
+                f"<p><em>Use 'Upload to Bill.com' button on each document to complete upload</em></p>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Attachments Synced"),
+                "message": _("Created %d new Bill.com document(s) from %d attachment(s)") % (created_count, len(attachments)),
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
     @api.model
     def sync_from_billcom(self, billcom_id):
         """Sync a bill/invoice from Bill.com by ID (called by webhook)
