@@ -21,6 +21,7 @@
         "security/ir.model.access.csv",
         "wizards/billcom_mfa_wizard_views.xml",
         "wizards/billcom_sync_wizard.xml",
+        "views/billcom_document_views.xml",
         "views/account_move_views.xml",
         "views/account_payment_register_views.xml",
         "views/account_payment_report.xml",

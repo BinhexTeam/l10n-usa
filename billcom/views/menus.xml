@@ -115,6 +115,14 @@
         sequence="50"
     />
 
+    <menuitem
+        id="menu_billcom_documents"
+        name="Documents"
+        parent="menu_billcom_records"
+        action="action_billcom_document"
+        sequence="60"
+    />
+
     <!-- Monitoring Submenu -->
     <menuitem
         id="menu_billcom_monitoring"

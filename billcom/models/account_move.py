@@ -15,6 +15,12 @@ class AccountMove(models.Model):
         help="Payment status from Bill.com (PAID, UNPAID, PARTIALLY_PAID, etc.)",
         readonly=True,
     )
+    billcom_document_ids = fields.One2many(
+        "billcom.document",
+        "bill_id",
+        string="Bill.com Documents",
+        help="Documents attached to this bill in Bill.com",
+    )
 
     def _prepare_bill_data(self):
         """Prepare bill data for Bill.com API"""

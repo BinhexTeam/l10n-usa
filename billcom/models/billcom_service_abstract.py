@@ -286,24 +286,46 @@ class BillcomServiceAbstract(models.AbstractModel):
 
     @api.model
     def _make_request(
-        self, endpoint, method="GET", data=None, params=None, extra_headers=None
+        self, endpoint, method="GET", data=None, params=None, extra_headers=None, is_file_upload=False
     ):
-        """Make a request to Bill.com API v3 with retry logic"""
+        """Make a request to Bill.com API v3 with retry logic
+
+        Args:
+            endpoint: API endpoint path
+            method: HTTP method (GET, POST, PUT, DELETE)
+            data: Request body data (dict for JSON, bytes for file upload)
+            params: Query parameters
+            extra_headers: Additional headers to include
+            is_file_upload: True if uploading a file (data should be bytes)
+        """
         config = self._get_config()
         max_retries, retry_delay = self._get_retry_config(config)
 
         for retry_count in range(max_retries + 1):
             try:
-                return self._execute_request(
-                    endpoint,
-                    method,
-                    data,
-                    params,
-                    config,
-                    retry_count,
-                    max_retries,
-                    extra_headers,
-                )
+                if is_file_upload:
+                    return self._execute_request_with_upload(
+                        endpoint,
+                        method,
+                        data,
+                        params,
+                        config,
+                        retry_count,
+                        max_retries,
+                        extra_headers,
+                        is_file_upload,
+                    )
+                else:
+                    return self._execute_request(
+                        endpoint,
+                        method,
+                        data,
+                        params,
+                        config,
+                        retry_count,
+                        max_retries,
+                        extra_headers,
+                    )
             except Exception as e:
                 if not self._should_retry(e, retry_count, max_retries):
                     raise
@@ -944,4 +966,193 @@ class BillcomServiceAbstract(models.AbstractModel):
                     )
                 )
 
-            raise UserError(_("MFA step-up failed: %s") % str(e))
+    def _execute_request_with_upload(
+        self,
+        endpoint,
+        method,
+        data,
+        params,
+        config,
+        retry_count,
+        max_retries,
+        extra_headers=None,
+        is_file_upload=False,
+    ):
+        """Execute request with support for file uploads"""
+        # Determine if this is a payment creation operation requiring MFA
+        is_payment_creation = method == "POST" and endpoint.rstrip("/") == "payments"
+
+        # Get appropriate token based on operation type
+        if is_payment_creation:
+            _logger.info("Payment creation detected - using MFA-trusted token")
+            token = self._get_mfa_token()
+        else:
+            token = self._get_token()
+
+        url = self._build_api_url(config, endpoint)
+        headers = self._build_headers(token, config)
+
+        # Modify headers for file upload
+        if is_file_upload:
+            headers["content-type"] = "application/octet-stream"
+
+        # Add extra headers if provided
+        if extra_headers:
+            headers.update(extra_headers)
+
+        self._log_request(method, url, retry_count, max_retries, data, params, headers)
+
+        # Send request with file upload support
+        if is_file_upload:
+            response = self._send_file_upload_request(method, url, headers, data, params)
+        else:
+            response = self._send_http_request(method, url, headers, data, params)
+
+        self._log_response(response)
+
+        # Check for expired/invalid session
+        if response.status_code in (401, 403):
+            error_details = self._extract_error_details(response)
+
+            if isinstance(error_details, list):
+                for error in error_details:
+                    if isinstance(error, dict):
+                        error_code = error.get("code")
+                        error_message = error.get("message", "")
+
+                        should_refresh_token = False
+
+                        if error_code == "BDC_1109":
+                            _logger.warning(
+                                "Session invalid (BDC_1109) - invalidating token and re-authenticating"
+                            )
+                            should_refresh_token = True
+
+                        elif error_code == "BDC_1361":
+                            if "untrusted" in error_message.lower():
+                                _logger.error(
+                                    "MFA-trusted session required (BDC_1361: Untrusted session)"
+                                )
+                                break
+                            else:
+                                _logger.warning(
+                                    "Session expired (BDC_1361) - invalidating token and refreshing"
+                                )
+                                should_refresh_token = True
+
+                        if should_refresh_token:
+                            try:
+                                config.sudo().write(
+                                    {
+                                        "token": False,
+                                        "token_expiry": False,
+                                    }
+                                )
+                                config.test_connection()
+                                _logger.info("Token refreshed successfully, retrying request")
+
+                                if is_payment_creation:
+                                    new_token = self._get_mfa_token()
+                                else:
+                                    new_token = config.token
+                                headers = self._build_headers(new_token, config)
+
+                                if is_file_upload:
+                                    headers["content-type"] = "application/octet-stream"
+
+                                if extra_headers:
+                                    headers.update(extra_headers)
+
+                                if is_file_upload:
+                                    response = self._send_file_upload_request(
+                                        method, url, headers, data, params
+                                    )
+                                else:
+                                    response = self._send_http_request(
+                                        method, url, headers, data, params
+                                    )
+                                self._log_response(response)
+
+                                return self._process_response(
+                                    response, retry_count, max_retries
+                                )
+
+                            except Exception as e:
+                                _logger.error("Failed to refresh token: %s", str(e))
+                            break
+
+        return self._process_response(response, retry_count, max_retries)
+
+    def _send_file_upload_request(self, method, url, headers, file_data, params):
+        """Send HTTP request with file data"""
+        method_upper = method.upper()
+
+        if method_upper == "POST":
+            return requests.post(
+                url, data=file_data, headers=headers, params=params, timeout=60
+            )
+        elif method_upper == "PUT":
+            return requests.put(
+                url, data=file_data, headers=headers, params=params, timeout=60
+            )
+        else:
+            raise UserError(_("File upload only supports POST and PUT methods"))
+
+    @api.model
+    def _download_document(self, download_url):
+        """Download document from Bill.com
+
+        Args:
+            download_url: Download URL from Bill.com document response
+
+        Returns:
+            bytes: File content
+        """
+        config = self._get_config()
+        token = self._get_token()
+
+        headers = {
+            "sessionId": token,
+            "devKey": config.dev_key,
+        }
+
+        _logger.info("Downloading document from Bill.com: %s", download_url)
+
+        try:
+            response = requests.get(download_url, headers=headers, timeout=60)
+            response.raise_for_status()
+
+            _logger.info(
+                "Document downloaded successfully (%d bytes)", len(response.content)
+            )
+            return response.content
+
+        except requests.exceptions.HTTPError as e:
+            error_details = self._extract_error_details(e.response)
+
+            http_status_map = {
+                401: "Unauthorized - Authentication failed or session expired",
+                403: "Forbidden - Insufficient permissions",
+                404: "Not Found - Document no longer exists",
+            }
+
+            status_description = http_status_map.get(
+                e.response.status_code,
+                f"HTTP {e.response.status_code}"
+            )
+
+            _logger.error(
+                "Bill.com Document Download Error: %s\n"
+                "URL: %s\n"
+                "Status Code: %s\n"
+                "Error Details: %s",
+                status_description,
+                download_url,
+                e.response.status_code,
+                error_details,
+            )
+            raise
+
+        except requests.exceptions.RequestException as e:
+            _logger.error("Document download failed: %s", str(e))
+            raise

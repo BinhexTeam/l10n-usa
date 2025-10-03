@@ -20,3 +20,5 @@ access_billcom_funding_account_user,billcom.funding.account user,model_billcom_f
 access_billcom_funding_account_manager,billcom.funding.account manager,model_billcom_funding_account,account.group_account_manager,1,1,1,1
 access_billcom_webhook_log_user,billcom.webhook.log user,model_billcom_webhook_log,account.group_account_invoice,1,0,0,0
 access_billcom_webhook_log_manager,billcom.webhook.log manager,model_billcom_webhook_log,account.group_account_manager,1,1,1,1
+access_billcom_document_user,billcom.document user,model_billcom_document,account.group_account_invoice,1,1,1,0
+access_billcom_document_manager,billcom.document manager,model_billcom_document,account.group_account_manager,1,1,1,1

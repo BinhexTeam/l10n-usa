@@ -45,14 +45,14 @@
                             </group>
                         </page>
 
-                        <!-- Tab 3: Transactions (Payments & Attachments) -->
+                        <!-- Tab 3: Transactions (Payments & Documents) -->
                         <page string="Transactions" name="transactions">
                             <group>
                                 <group string="Payments">
                                     <field name="sync_payments" widget="boolean_toggle" />
                                 </group>
-                                <group string="Attachments">
-                                    <field name="sync_attachments" widget="boolean_toggle" />
+                                <group string="Bill Documents">
+                                    <field name="sync_documents" widget="boolean_toggle" />
                                 </group>
                             </group>
                         </page>

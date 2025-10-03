@@ -36,6 +36,23 @@
                             />
                         </group>
                     </group>
+                    <separator string="Bill.com Documents" attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}" />
+                    <field
+                        name="billcom_document_ids"
+                        attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}"
+                        context="{'default_bill_id': active_id}"
+                    >
+                        <tree editable="bottom" decoration-success="upload_status == 'uploaded'" decoration-danger="upload_status == 'failed'" decoration-warning="upload_status == 'in_progress'">
+                            <field name="name" />
+                            <field name="file_data" filename="name" widget="binary" />
+                            <field name="file_size" widget="integer" readonly="1" />
+                            <field name="billcom_id" optional="show" readonly="1" />
+                            <field name="upload_status" widget="badge" decoration-success="upload_status == 'uploaded'" decoration-danger="upload_status == 'failed'" decoration-warning="upload_status == 'in_progress'" decoration-muted="upload_status == 'pending'" />
+                            <button name="button_upload_to_billcom" type="object" string="Upload" class="btn-primary" attrs="{'invisible': [('upload_status', 'in', ['uploaded', 'in_progress'])]}" icon="fa-upload" />
+                            <button name="button_check_upload_status" type="object" string="Check Status" class="btn-secondary" attrs="{'invisible': [('upload_status', '!=', 'in_progress')]}" icon="fa-refresh" />
+                            <button name="button_download_from_billcom" type="object" string="Download" class="btn-secondary" attrs="{'invisible': [('upload_status', '!=', 'uploaded')]}" icon="fa-download" />
+                        </tree>
+                    </field>
                 </page>
             </xpath>
             <xpath expr="//header" position="inside">

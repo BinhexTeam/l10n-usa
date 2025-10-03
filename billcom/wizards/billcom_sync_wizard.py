@@ -37,10 +37,10 @@ class BillcomSyncWizard(models.TransientModel):
         default=True,
         help="Synchronize payment data with Bill.com",
     )
-    sync_attachments = fields.Boolean(
-        string="Sync Attachments",
+    sync_documents = fields.Boolean(
+        string="Sync Documents",
         default=False,
-        help="Synchronize document attachments with Bill.com",
+        help="Synchronize bill documents with Bill.com",
     )
 
     # Sync Direction
@@ -156,8 +156,8 @@ class BillcomSyncWizard(models.TransientModel):
             sync_types.append("invoice")
         if self.sync_payments:
             sync_types.append("payment")
-        if self.sync_attachments:
-            sync_types.append("attachment")
+        if self.sync_documents:
+            sync_types.append("document")
 
         if not sync_types:
             raise UserError(_("Please select at least one sync type"))
@@ -209,7 +209,7 @@ class BillcomSyncWizard(models.TransientModel):
             'bill': '📄',
             'invoice': '📑',
             'payment': '💰',
-            'attachment': '📎'
+            'document': '📎'
         }
 
         # Color mapping for sync types
@@ -219,7 +219,7 @@ class BillcomSyncWizard(models.TransientModel):
             'bill': '#F06050',
             'invoice': '#00A09D',
             'payment': '#17A2B8',
-            'attachment': '#6C757D'
+            'document': '#6C757D'
         }
 
         html = '''
@@ -356,8 +356,8 @@ class BillcomSyncWizard(models.TransientModel):
                 return self._create_invoice_sync_items()
             elif sync_type == "payment":
                 return self._create_payment_sync_items()
-            elif sync_type == "attachment":
-                return self._create_attachment_sync_items()
+            elif sync_type == "document":
+                return self._create_document_sync_items()
             else:
                 return []
 
@@ -911,12 +911,12 @@ class BillcomSyncWizard(models.TransientModel):
 
         return queue_items
 
-    def _create_attachment_sync_items(self):
-        """Create sync items for attachments"""
-        # Find attachments related to bills that are synced with Bill.com
+    def _create_document_sync_items(self):
+        """Create sync items for Bill.com documents"""
+        # Find billcom.document records that need to be synced
         domain = [
-            ("res_model", "=", "account.move"),
-            ("res_id", "!=", False),
+            ("bill_id", "!=", False),
+            ("upload_status", "in", ["pending", "failed"]),
         ]
 
         if self.filter_by_date and self.date_from and self.date_to:
@@ -927,22 +927,21 @@ class BillcomSyncWizard(models.TransientModel):
                 ]
             )
 
-        attachments = self.env["ir.attachment"].search(domain)
+        documents = self.env["billcom.document"].search(domain)
 
-        # Filter attachments that belong to synced bills
-        filtered_attachments = attachments.filtered(
-            lambda a: a.res_model == "account.move"
-            and a.res_id
-            and self.env["account.move"].browse(a.res_id).exists()
-            and self.env["account.move"].browse(a.res_id).partner_id.is_sync_to_billcom
+        # Filter documents that belong to synced bills
+        filtered_documents = documents.filtered(
+            lambda d: d.bill_id
+            and d.bill_id.billcom_id
+            and d.bill_id.partner_id.is_sync_to_billcom
         )
 
         queue_items = []
-        for attachment in filtered_attachments:
+        for document in filtered_documents:
             queue_item = self.env["billcom.sync.queue"].create_sync_item(
-                sync_type="attachment",
-                record_model="ir.attachment",
-                record_id=attachment.id,
+                sync_type="document",
+                record_model="billcom.document",
+                record_id=document.id,
                 direction=self.sync_direction,
                 priority=self.priority,
             )
@@ -993,8 +992,8 @@ class BillcomSyncWizard(models.TransientModel):
                         result = self._process_invoice_items(items, service)
                     elif sync_type == "payment":
                         result = self._process_payment_items(items, service)
-                    elif sync_type == "attachment":
-                        result = self._process_attachment_items(items, service)
+                    elif sync_type == "document":
+                        result = self._process_document_items(items, service)
                     else:
                         _logger.warning(f"Unknown sync type: {sync_type}")
                         result = {"processed": 0, "errors": len(items)}
@@ -1136,23 +1135,31 @@ class BillcomSyncWizard(models.TransientModel):
 
         return service.sync_payments_by_domain(domain)
 
-    def _process_attachment_items(self, items, service):
-        """Process attachment sync items"""
+    def _process_document_items(self, items, service):
+        """Process Bill.com document sync items"""
         # Build domain from items
-        attachment_ids = [
-            item.record_id for item in items if item.record_model == "ir.attachment"
+        document_ids = [
+            item.record_id for item in items if item.record_model == "billcom.document"
         ]
-        domain = [("id", "in", attachment_ids)]
 
-        if self.filter_by_date and self.date_from and self.date_to:
-            domain.extend(
-                [
-                    ("create_date", ">=", self.date_from),
-                    ("create_date", "<=", self.date_to + timedelta(days=1)),
-                ]
-            )
+        documents = self.env["billcom.document"].browse(document_ids)
 
-        return service.sync_attachments_by_domain(domain)
+        processed = 0
+        errors = []
+
+        for document in documents:
+            try:
+                # Upload document to Bill.com
+                document.button_upload_to_billcom()
+                processed += 1
+            except Exception as e:
+                _logger.error(f"Error uploading document {document.id}: {e}")
+                errors.append(str(e))
+
+        return {
+            "processed": processed,
+            "errors": errors,
+        }
 
     def action_view_queue(self):
         """View the sync queue"""

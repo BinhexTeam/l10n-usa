@@ -6,6 +6,7 @@ from . import billcom_logger
 from . import billcom_sync_queue
 from . import billcom_webhook_log
 from . import billcom_funding_account
+from . import billcom_document
 from . import res_partner
 from . import account_move
 from . import account_payment
