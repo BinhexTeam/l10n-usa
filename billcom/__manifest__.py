@@ -33,7 +33,7 @@
         "views/billcom_webhook_log_views.xml",
         "views/res_partner_bank_views.xml",
         "views/res_partner_views.xml",
-
+        "views/billcom_from_billcom_actions.xml",
         "views/menus.xml",
     ],
     "installable": True,

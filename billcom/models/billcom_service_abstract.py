@@ -317,32 +317,49 @@ class BillcomServiceAbstract(models.AbstractModel):
 
         self._log_response(response)
 
-        # Check for expired session - refresh token and retry once
-        if response.status_code == 403:
+        # Check for expired/invalid session - refresh token and retry once
+        # BDC_1109 (401): Session is invalid - need to re-login
+        # BDC_1361 (403): Session expired or untrusted
+        if response.status_code in (401, 403):
             error_details = self._extract_error_details(response)
 
             if isinstance(error_details, list):
                 for error in error_details:
-                    if isinstance(error, dict) and error.get("code") == "BDC_1361":
+                    if isinstance(error, dict):
+                        error_code = error.get("code")
                         error_message = error.get("message", "")
 
-                        # BDC_1361 can mean two things:
-                        # 1. "Untrusted session" = MFA required (cannot be fixed with token refresh)
-                        # 2. "Session expired" = Token expired (can be fixed with token refresh)
+                        # Handle BDC_1109: Session is invalid (needs re-login)
+                        # Handle BDC_1361: Session expired (unless it's "untrusted")
+                        should_refresh_token = False
 
-                        if "untrusted" in error_message.lower():
-                            _logger.error(
-                                "MFA-trusted session required (BDC_1361: Untrusted session). This endpoint requires MFA authentication."
-                            )
-                            _logger.error(
-                                "Payment creation requires MFA setup. Please configure MFA for this Bill.com account."
-                            )
-                            # Don't retry - this won't be fixed by token refresh
-                            break
-                        else:
+                        if error_code == "BDC_1109":
                             _logger.warning(
-                                "Session expired (BDC_1361) - invalidating token and refreshing"
+                                "Session invalid (BDC_1109) - invalidating token and re-authenticating"
                             )
+                            should_refresh_token = True
+
+                        elif error_code == "BDC_1361":
+                            # BDC_1361 can mean two things:
+                            # 1. "Untrusted session" = MFA required (cannot be fixed with token refresh)
+                            # 2. "Session expired" = Token expired (can be fixed with token refresh)
+                            if "untrusted" in error_message.lower():
+                                _logger.error(
+                                    "MFA-trusted session required (BDC_1361: Untrusted session). This endpoint requires MFA authentication."
+                                )
+                                _logger.error(
+                                    "Payment creation requires MFA setup. Please configure MFA for this Bill.com account."
+                                )
+                                # Don't retry - this won't be fixed by token refresh
+                                break
+                            else:
+                                _logger.warning(
+                                    "Session expired (BDC_1361) - invalidating token and refreshing"
+                                )
+                                should_refresh_token = True
+
+                        # If we need to refresh the token, do it now
+                        if should_refresh_token:
                             try:
                                 # Invalidate the current token to force a new authentication
                                 config.sudo().write(
@@ -381,7 +398,7 @@ class BillcomServiceAbstract(models.AbstractModel):
 
                             except Exception as e:
                                 _logger.error("Failed to refresh token: %s", str(e))
-                                # Fall through to process the original 403 error
+                                # Fall through to process the original error
                             break
 
         return self._process_response(response, retry_count, max_retries)

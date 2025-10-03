@@ -67,6 +67,54 @@
         sequence="20"
     />
 
+    <!-- Bill.com Records Submenu -->
+    <menuitem
+        id="menu_billcom_records"
+        name="From Bill.com"
+        parent="menu_billcom_main"
+        sequence="5"
+    />
+
+    <menuitem
+        id="menu_billcom_vendors_from_billcom"
+        name="Vendors"
+        parent="menu_billcom_records"
+        action="action_window_vendors_from_billcom"
+        sequence="10"
+    />
+
+    <menuitem
+        id="menu_billcom_customers_from_billcom"
+        name="Customers"
+        parent="menu_billcom_records"
+        action="action_window_customers_from_billcom"
+        sequence="20"
+    />
+
+    <menuitem
+        id="menu_billcom_bills_from_billcom"
+        name="Bills"
+        parent="menu_billcom_records"
+        action="action_window_bills_from_billcom"
+        sequence="30"
+    />
+
+    <menuitem
+        id="menu_billcom_invoices_from_billcom"
+        name="Invoices"
+        parent="menu_billcom_records"
+        action="action_window_invoices_from_billcom"
+        sequence="40"
+    />
+
+    <menuitem
+        id="menu_billcom_payments_from_billcom"
+        name="Payments"
+        parent="menu_billcom_records"
+        action="action_window_payments_from_billcom"
+        sequence="50"
+    />
+
     <!-- Monitoring Submenu -->
     <menuitem
         id="menu_billcom_monitoring"

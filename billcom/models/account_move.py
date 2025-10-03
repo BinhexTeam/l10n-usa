@@ -282,7 +282,8 @@ class AccountMove(models.Model):
                 if document_data and document_data.get("id"):
                     endpoint = "bills"
                     move_type = "in_invoice"
-            except Exception:
+            except Exception as e:
+                _logger.debug("Document %s not found in bills endpoint: %s", billcom_id, str(e))
                 pass
 
             # If not a bill, try invoices endpoint
@@ -294,11 +295,15 @@ class AccountMove(models.Model):
                     if document_data and document_data.get("id"):
                         endpoint = "invoices"
                         move_type = "out_invoice"
-                except Exception:
+                except Exception as e:
+                    _logger.debug("Document %s not found in invoices endpoint: %s", billcom_id, str(e))
                     pass
 
             if not document_data:
-                _logger.error("Could not fetch document %s from Bill.com", billcom_id)
+                _logger.error(
+                    "Could not fetch document %s from Bill.com - tried both bills and invoices endpoints",
+                    billcom_id
+                )
                 return False
 
             _logger.info("Syncing %s %s from Bill.com", endpoint, billcom_id)
