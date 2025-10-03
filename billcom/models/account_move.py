@@ -189,6 +189,9 @@ class AccountMove(models.Model):
                 )
 
             if result and result.get("id"):
+                action = "updated" if existing_id else "created"
+                doc_type = "Bill" if self.move_type == "in_invoice" else "Invoice"
+
                 self.with_context(skip_billcom_sync=True).write(
                     {
                         "billcom": result.get("id"),
@@ -197,11 +200,56 @@ class AccountMove(models.Model):
                     }
                 )
                 _logger.info("Successfully synced %s with Bill.com", self.name)
+
+                # Post success message to chatter
+                self.message_post(
+                    body=f"<p><strong>Bill.com Sync Successful</strong></p>"
+                    f"<ul>"
+                    f"<li>Type: {doc_type}</li>"
+                    f"<li>Action: {action.title()}</li>"
+                    f"<li>Bill.com ID: {result.get('id')}</li>"
+                    f"<li>Document Number: {self.name}</li>"
+                    f"</ul>",
+                    message_type="notification",
+                    subtype_xmlid="mail.mt_note",
+                )
+
                 return result
+
+            # Post error if no ID in response
+            self.message_post(
+                body=f"<p><strong>Bill.com Sync Failed</strong></p>"
+                f"<p>Unexpected response format from Bill.com API</p>"
+                f"<p><em>Response: {result}</em></p>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
             return False
         except Exception as e:
-            _logger.error("Error syncing %s to Bill.com: %s", self.name, str(e))
-            return False
+            error_detail = str(e)
+
+            # Try to extract user-friendly error message
+            service = self.env["billcom.service"]
+            friendly_message = service._extract_friendly_error(e)
+
+            _logger.error("Error syncing %s to Bill.com: %s", self.name, error_detail)
+
+            # Post detailed error to chatter
+            self.message_post(
+                body=f"<p><strong>Bill.com Sync Error</strong></p>"
+                f"<p>Failed to sync document to Bill.com</p>"
+                f"<p><strong>Error:</strong></p>"
+                f"<pre>{friendly_message}</pre>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
+
+            # Raise user-friendly error
+            from odoo.exceptions import UserError
+
+            raise UserError(
+                _("Failed to sync document to Bill.com:\n\n%s") % friendly_message
+            ) from e
 
     @api.model
     def _sync_documents_cron(self):
@@ -283,8 +331,9 @@ class AccountMove(models.Model):
                     endpoint = "bills"
                     move_type = "in_invoice"
             except Exception as e:
-                _logger.debug("Document %s not found in bills endpoint: %s", billcom_id, str(e))
-                pass
+                _logger.debug(
+                    "Document %s not found in bills endpoint: %s", billcom_id, str(e)
+                )
 
             # If not a bill, try invoices endpoint
             if not document_data:
@@ -296,13 +345,16 @@ class AccountMove(models.Model):
                         endpoint = "invoices"
                         move_type = "out_invoice"
                 except Exception as e:
-                    _logger.debug("Document %s not found in invoices endpoint: %s", billcom_id, str(e))
-                    pass
+                    _logger.debug(
+                        "Document %s not found in invoices endpoint: %s",
+                        billcom_id,
+                        str(e),
+                    )
 
             if not document_data:
                 _logger.error(
                     "Could not fetch document %s from Bill.com - tried both bills and invoices endpoints",
-                    billcom_id
+                    billcom_id,
                 )
                 return False
 
@@ -368,14 +420,45 @@ class AccountMove(models.Model):
                 # Update existing move
                 move.with_context(skip_billcom_sync=True).write(vals)
                 _logger.info("Updated existing %s in Odoo: %s", endpoint, move.name)
+                action = "updated"
             else:
                 # Create new move
                 vals["is_sync_to_billcom"] = False  # Prevent sync back to Bill.com
                 move = self.with_context(skip_billcom_sync=True).create(vals)
                 _logger.info("Created new %s in Odoo: %s", endpoint, move.name)
+                action = "created"
+
+            # Post success message to chatter
+            doc_type = "Bill" if endpoint == "bills" else "Invoice"
+            move.message_post(
+                body=f"<p><strong>Synced from Bill.com</strong></p>"
+                f"<ul>"
+                f"<li>Type: {doc_type}</li>"
+                f"<li>Action: {action.title()}</li>"
+                f"<li>Bill.com ID: {billcom_id}</li>"
+                f"<li>Source: Webhook</li>"
+                f"</ul>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
 
             return True
 
         except Exception as e:
-            _logger.error("Error syncing %s from Bill.com: %s", billcom_id, str(e))
+            error_detail = str(e)
+            _logger.error(
+                "Error syncing %s from Bill.com: %s", billcom_id, error_detail
+            )
+
+            # Try to post error to existing move if found
+            if move:
+                move.message_post(
+                    body=f"<p><strong>Bill.com Sync Error</strong></p>"
+                    f"<p>Failed to sync from Bill.com</p>"
+                    f"<p><strong>Bill.com ID:</strong> {billcom_id}</p>"
+                    f"<p><strong>Error:</strong> {error_detail}</p>",
+                    message_type="notification",
+                    subtype_xmlid="mail.mt_note",
+                )
+
             return False

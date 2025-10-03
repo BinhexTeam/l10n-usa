@@ -266,6 +266,18 @@ class AccountPayment(models.Model):
                             "last_sync_date": fields.Datetime.now(),
                         }
                     )
+
+                    # Post info message to chatter
+                    self.message_post(
+                        body=f"<p><strong>Bill.com Payment Status Updated</strong></p>"
+                        f"<ul>"
+                        f"<li>Bill.com ID: {payment_id}</li>"
+                        f"<li>Status: {result.get('singleStatus')}</li>"
+                        f"<li>Note: Payment already exists in Bill.com. API does not support updates.</li>"
+                        f"</ul>",
+                        message_type="notification",
+                        subtype_xmlid="mail.mt_note",
+                    )
             else:
                 # Create new payment
                 result = self.env["billcom.service"]._make_request(
@@ -273,6 +285,9 @@ class AccountPayment(models.Model):
                 )
 
             if result and result.get("id"):
+                is_new = not (self.billcom_id or self.billcom)
+                "created" if is_new else "status_updated"
+
                 # Update payment with Bill.com data
                 update_vals = {
                     "billcom": result.get("id"),
@@ -293,11 +308,59 @@ class AccountPayment(models.Model):
 
                 self.with_context(skip_billcom_sync=True).write(update_vals)
                 _logger.info("Successfully synced payment %s with Bill.com", self.name)
+
+                # Post success message to chatter (only for new payments)
+                if is_new:
+                    self.message_post(
+                        body=f"<p><strong>Bill.com Payment Created</strong></p>"
+                        f"<ul>"
+                        f"<li>Bill.com ID: {result.get('id')}</li>"
+                        f"<li>Status: {result.get('singleStatus')}</li>"
+                        f"<li>Confirmation #: {result.get('confirmationNumber', 'N/A')}</li>"
+                        f"<li>Transaction #: {result.get('transactionNumber', 'N/A')}</li>"
+                        f"</ul>",
+                        message_type="notification",
+                        subtype_xmlid="mail.mt_note",
+                    )
+
                 return result
+
+            # Post error if no ID in response
+            self.message_post(
+                body=f"<p><strong>Bill.com Payment Sync Failed</strong></p>"
+                f"<p>Unexpected response format from Bill.com API</p>"
+                f"<p><em>Response: {result}</em></p>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
             return False
         except Exception as e:
-            _logger.error("Error syncing payment %s to Bill.com: %s", self.name, str(e))
-            return False
+            error_detail = str(e)
+
+            # Try to extract user-friendly error message
+            service = self.env["billcom.service"]
+            friendly_message = service._extract_friendly_error(e)
+
+            _logger.error(
+                "Error syncing payment %s to Bill.com: %s", self.name, error_detail
+            )
+
+            # Post detailed error to chatter
+            self.message_post(
+                body=f"<p><strong>Bill.com Payment Sync Error</strong></p>"
+                f"<p>Failed to sync payment to Bill.com</p>"
+                f"<p><strong>Error:</strong></p>"
+                f"<pre>{friendly_message}</pre>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
+
+            # Raise user-friendly error
+            from odoo.exceptions import UserError
+
+            raise UserError(
+                _("Failed to sync payment to Bill.com:\n\n%s") % friendly_message
+            ) from e
 
     def _map_billcom_status(self, billcom_status):
         """Map Bill.com payment status to Odoo status"""

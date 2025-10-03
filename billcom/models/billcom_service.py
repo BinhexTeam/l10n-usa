@@ -107,6 +107,7 @@ class BillcomService(models.AbstractModel):
             # Process successful response
             if result and result.get("id"):
                 partner_id = result.get("id")
+                action = "updated" if existing_id else "created"
 
                 # Update partner with Bill.com ID (save to both fields)
                 partner.with_context(skip_billcom_sync=True).write(
@@ -124,6 +125,18 @@ class BillcomService(models.AbstractModel):
                     partner_id,
                 )
 
+                # Post success message to chatter
+                partner.message_post(
+                    body=f"<p><strong>Bill.com Sync Successful</strong></p>"
+                    f"<ul>"
+                    f"<li>Type: {partner_type.title()}</li>"
+                    f"<li>Action: {action.title()}</li>"
+                    f"<li>Bill.com ID: {partner_id}</li>"
+                    f"</ul>",
+                    message_type="notification",
+                    subtype_xmlid="mail.mt_note",
+                )
+
                 # If this is a vendor and it has bank accounts, sync them separately
                 if partner_type == "vendor" and partner.bank_ids:
                     _logger.info("Syncing bank account for vendor %s", partner.name)
@@ -137,21 +150,60 @@ class BillcomService(models.AbstractModel):
                             partner.name,
                             str(e),
                         )
+                        # Post warning to chatter
+                        partner.message_post(
+                            body=f"<p><strong>Bill.com Bank Account Sync Warning</strong></p>"
+                            f"<p>Bank account synchronization failed: {str(e)}</p>",
+                            message_type="notification",
+                            subtype_xmlid="mail.mt_note",
+                        )
 
                 return partner_id
             else:
+                error_msg = "Unexpected response format from Bill.com API"
                 _logger.warning(
-                    "Unexpected response format from Bill.com for %s %s: %s",
+                    "%s for %s %s: %s",
+                    error_msg,
                     partner_type,
                     partner.name,
                     result,
                 )
+                # Post error to chatter
+                partner.message_post(
+                    body=f"<p><strong>Bill.com Sync Failed</strong></p>"
+                    f"<p>{error_msg}</p>"
+                    f"<p><em>Response: {result}</em></p>",
+                    message_type="notification",
+                    subtype_xmlid="mail.mt_note",
+                )
                 return False
         except Exception as e:
+            error_detail = str(e)
+
+            # Try to extract user-friendly error message from HTTP exception
+            friendly_message = self._extract_friendly_error(e)
+
             _logger.error(
-                "%s sync failed for %s: %s", partner_type.title(), partner.name, str(e)
+                "%s sync failed for %s: %s",
+                partner_type.title(),
+                partner.name,
+                error_detail,
             )
-            raise
+
+            # Post detailed error to chatter
+            partner.message_post(
+                body=f"<p><strong>Bill.com Sync Error</strong></p>"
+                f"<p>Failed to sync {partner_type} to Bill.com</p>"
+                f"<p><strong>Error:</strong> {friendly_message}</p>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
+
+            # Raise user-friendly error
+            raise UserError(
+                _("Failed to sync %s to Bill.com:\n\n%s")
+                % (partner_type, friendly_message)
+            ) from e
 
     @api.model
     def full_sync(self):

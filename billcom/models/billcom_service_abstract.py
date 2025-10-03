@@ -178,24 +178,51 @@ class BillcomServiceAbstract(models.AbstractModel):
             return result.get("sessionId")
 
         except requests.exceptions.RequestException as e:
-            _logger.error("HTTP error during Bill.com authentication: %s", str(e))
+            error_detail = str(e)
+            response_content = getattr(e.response, "content", b"").decode(
+                "utf-8", errors="ignore"
+            )
+            status_code = getattr(e.response, "status_code", "Unknown")
+
             _logger.error(
-                "Response content: %s", getattr(e.response, "content", "No content")
+                "Bill.com Authentication HTTP Error\n"
+                "Organization ID: %s\n"
+                "API URL: %s\n"
+                "Status Code: %s\n"
+                "Error: %s\n"
+                "Response: %s",
+                config.organization_id,
+                config.api_url,
+                status_code,
+                error_detail,
+                response_content[:500] if response_content else "No content",
             )
 
             config.sudo().write(
                 {
                     "state": "error",
                     "last_connection_test": fields.Datetime.now(),
-                    "last_error_message": str(e),
+                    "last_error_message": f"HTTP {status_code}: {error_detail}",
                 }
             )
 
             raise UserError(
-                _("HTTP error during Bill.com authentication: %s") % str(e)
+                _("Bill.com authentication failed (HTTP %s): %s")
+                % (status_code, error_detail)
             ) from e
         except Exception as e:
-            _logger.error("Unexpected error during Bill.com authentication: %s", str(e))
+            error_detail = str(e)
+            _logger.error(
+                "Bill.com Authentication Unexpected Error\n"
+                "Organization ID: %s\n"
+                "API URL: %s\n"
+                "Error Type: %s\n"
+                "Error: %s",
+                config.organization_id,
+                config.api_url,
+                type(e).__name__,
+                error_detail,
+            )
 
             config.sudo().write(
                 {
@@ -234,7 +261,14 @@ class BillcomServiceAbstract(models.AbstractModel):
 
         # Check if we have rememberMeId for step-up
         if not config.mfa_remember_me_id:
-            _logger.error("MFA required for payment but rememberMeId not configured")
+            _logger.error(
+                "Bill.com MFA Configuration Required\n"
+                "Payment creation requires MFA-trusted session\n"
+                "Organization: %s\n"
+                "Action Required: Configure MFA using 'Setup MFA' button\n"
+                "Documentation: claudedocs/MFA_QUICK_GUIDE.md",
+                config.organization_id,
+            )
             raise UserError(
                 _(
                     "MFA authentication is required for payment creation.\n\n"
@@ -472,11 +506,32 @@ class BillcomServiceAbstract(models.AbstractModel):
             # Try to extract detailed error information from response body
             error_details = self._extract_error_details(response)
 
+            # Build descriptive error message
+            http_status_map = {
+                400: "Bad Request - Invalid data sent to Bill.com API",
+                401: "Unauthorized - Authentication failed or session expired",
+                403: "Forbidden - Insufficient permissions or session invalid",
+                404: "Not Found - Requested resource does not exist",
+                429: "Rate Limit Exceeded - Too many API requests",
+                500: "Internal Server Error - Bill.com API experiencing issues",
+                502: "Bad Gateway - Bill.com API temporarily unavailable",
+                503: "Service Unavailable - Bill.com API maintenance or overload",
+            }
+
+            status_description = http_status_map.get(
+                response.status_code, f"HTTP {response.status_code} Error"
+            )
+
             # Log detailed error information
             _logger.error(
-                "Bill.com API error %s for URL: %s\nError details: %s",
-                response.status_code,
+                "Bill.com API Error: %s\n"
+                "Request: %s %s\n"
+                "Status Code: %s\n"
+                "Error Details: %s",
+                status_description,
+                response.request.method,
                 response.url,
+                response.status_code,
                 error_details,
             )
 
@@ -491,14 +546,38 @@ class BillcomServiceAbstract(models.AbstractModel):
         try:
             result = response.json()
         except ValueError as e:
-            _logger.error("JSON parsing error. Response content: %s", response.content)
+            _logger.error(
+                "Bill.com API Response Parsing Error\n"
+                "Failed to parse JSON response from Bill.com\n"
+                "URL: %s\n"
+                "Response Length: %s bytes\n"
+                "Error: %s\n"
+                "Response Preview: %s",
+                response.url,
+                len(response.content),
+                str(e),
+                response.content[:500],
+            )
             raise self._create_retryable_exception(response, f"JSON parsing error: {e}")
 
         # Check for API-level errors
         if isinstance(result, dict) and result.get("status") == "error":
             error_message = result.get("errorMessage", "Unknown API error")
-            _logger.error("Bill.com API-level error: %s", error_message)
-            raise self._create_retryable_exception(response, error_message)
+            error_code = result.get("errorCode", "UNKNOWN")
+            _logger.error(
+                "Bill.com API-level Error\n"
+                "Error Code: %s\n"
+                "Error Message: %s\n"
+                "URL: %s\n"
+                "Full Response: %s",
+                error_code,
+                error_message,
+                response.url,
+                result,
+            )
+            raise self._create_retryable_exception(
+                response, f"{error_code}: {error_message}"
+            )
 
         return result
 
@@ -536,6 +615,64 @@ class BillcomServiceAbstract(models.AbstractModel):
             _logger.debug("Could not parse error response as JSON: %s", str(e))
             return response.text
 
+    def _extract_friendly_error(self, exception):
+        """Extract user-friendly error message from exception
+
+        Args:
+            exception: The exception object (usually HTTPError)
+
+        Returns:
+            str: User-friendly error message in English
+        """
+        try:
+            # Check if it's an HTTP error with a response
+            if hasattr(exception, "response") and exception.response is not None:
+                response = exception.response
+                error_details = self._extract_error_details(response)
+
+                # Bill.com API v3 format: list of error objects
+                if isinstance(error_details, list):
+                    messages = []
+                    for error in error_details:
+                        if isinstance(error, dict) and error.get("message"):
+                            msg = error["message"]
+                            # Make field names more readable
+                            # Example: "email: must not be blank" -> "Email is required"
+                            if ":" in msg:
+                                field, requirement = msg.split(":", 1)
+                                field = field.strip().replace("_", " ").title()
+                                requirement = requirement.strip()
+
+                                if "must not be blank" in requirement:
+                                    messages.append(f"{field} is required")
+                                elif "must not be null" in requirement:
+                                    messages.append(f"{field} is required")
+                                else:
+                                    messages.append(f"{field}: {requirement}")
+                            else:
+                                messages.append(msg)
+
+                    if messages:
+                        return "\n".join(f"• {msg}" for msg in messages)
+
+                # Dict format
+                elif isinstance(error_details, dict):
+                    if "errorMessage" in error_details:
+                        return error_details["errorMessage"]
+                    elif "message" in error_details:
+                        return error_details["message"]
+
+                # String format
+                elif isinstance(error_details, str):
+                    return error_details
+
+            # Fallback to exception message
+            return str(exception)
+
+        except Exception as e:
+            _logger.debug("Could not extract friendly error message: %s", str(e))
+            return str(exception)
+
     def _is_retryable_status(self, status_code):
         """Check if HTTP status code is retryable"""
         return status_code in (429, 500, 502, 503, 504)
@@ -556,6 +693,19 @@ class BillcomServiceAbstract(models.AbstractModel):
         """Determine if an exception should trigger a retry"""
         if retry_count >= max_retries:
             return False
+
+        # Don't retry on client errors (400, 404) - these are validation/data errors
+        # that won't be fixed by retrying
+        if hasattr(exception, "response") and exception.response is not None:
+            status_code = exception.response.status_code
+            # 400 = Bad Request (validation errors)
+            # 404 = Not Found (resource doesn't exist)
+            if status_code in (400, 404):
+                _logger.info(
+                    "Not retrying request - HTTP %s is a client error that won't be fixed by retrying",
+                    status_code,
+                )
+                return False
 
         # Retry on network errors
         if isinstance(
