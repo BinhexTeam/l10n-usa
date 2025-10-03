@@ -14,11 +14,12 @@
 
 
             <!-- Add to Sales tab for customers -->
-            <xpath
-                expr="//page[@name='sales_purchases']"
-                position="after"
-            >
-                <page name="billcom" string="Bill.com Integration" attrs="{'invisible': [('customer_rank', '=', 0), ('supplier_rank', '=', 0)]}">
+            <xpath expr="//page[@name='sales_purchases']" position="after">
+                <page
+                    name="billcom_id"
+                    string="Bill.com Integration"
+                    attrs="{'invisible': [('customer_rank', '=', 0), ('supplier_rank', '=', 0)]}"
+                >
                     <group>
                         <group
                             string="Vendor"
@@ -115,7 +116,7 @@
         <field name="arch" type="xml">
             <field name="display_name" position="after">
                 <field name="is_sync_to_billcom" optional="show" />
-                <field name="billcom" optional="hide" />
+                <field name="billcom_id" optional="hide" />
                 <field name="last_sync_date" optional="hide" />
             </field>
         </field>

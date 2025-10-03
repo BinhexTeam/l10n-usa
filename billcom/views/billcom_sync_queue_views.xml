@@ -6,7 +6,6 @@
         <field name="model">billcom.sync.queue</field>
         <field name="arch" type="xml">
             <tree
-                string="Bill.com Sync Queue"
                 decoration-success="state == 'success'"
                 decoration-danger="state == 'error'"
                 decoration-warning="state == 'queued'"

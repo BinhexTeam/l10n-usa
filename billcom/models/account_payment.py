@@ -108,7 +108,10 @@ class AccountPayment(models.Model):
         funding_account_id = False
 
         # Try to get funding account from journal's bank account
-        if self.journal_id.bank_account_id and self.journal_id.bank_account_id.billcom_funding_account_id:
+        if (
+            self.journal_id.bank_account_id
+            and self.journal_id.bank_account_id.billcom_funding_account_id
+        ):
             funding_account = self.journal_id.bank_account_id.billcom_funding_account_id
             funding_account_id = funding_account.billcom_id
             _logger.info(
@@ -184,7 +187,8 @@ class AccountPayment(models.Model):
             "processingOptions": {
                 "createBill": create_bill,
                 "requestPayFaster": self.billcom_pay_faster or False,
-                "requestCheckDeliveryType": self.billcom_check_delivery_type or "STANDARD",
+                "requestCheckDeliveryType": self.billcom_check_delivery_type
+                or "STANDARD",
             },
         }
 
@@ -215,9 +219,9 @@ class AccountPayment(models.Model):
             }
             # Add wire instructions if available
             if self.partner_id.bank_ids and self.partner_id.bank_ids[0].bank_id.bic:
-                payment_data["internationalOptions"]["wireInstructions"] = (
-                    self.partner_id.bank_ids[0].bank_id.bic
-                )
+                payment_data["internationalOptions"][
+                    "wireInstructions"
+                ] = self.partner_id.bank_ids[0].bank_id.bic
 
         return payment_data
 
@@ -307,28 +311,28 @@ class AccountPayment(models.Model):
         }
         return status_map.get(billcom_status, "draft")
 
-    def write(self, vals):
-        """Override write to sync changes to Bill.com"""
-        res = super().write(vals)
-        if self.env.context.get("skip_billcom_sync"):
-            return res
+    # def write(self, vals):
+    #     """Override write to sync changes to Bill.com"""
+    #     res = super().write(vals)
+    #     if self.env.context.get("skip_billcom_sync"):
+    #         return res
 
-        for record in self:
-            # Only sync if payment was created in Odoo (not from Bill.com)
-            # Payments from Bill.com have billcom_id set
-            if (
-                record.is_sync_to_billcom
-                and record.partner_id.is_sync_to_billcom
-                and record.payment_type == "outbound"
-                and record.partner_type == "supplier"
-                and not record.billcom_id  # Skip if already synced from Bill.com
-            ):
-                try:
-                    record.with_context(skip_billcom_sync=True).button_sync_to_billcom()
-                except Exception as e:
-                    _logger.error("Error syncing payment to Bill.com: %s", str(e))
+    #     for record in self:
+    #         # Only sync if payment was created in Odoo (not from Bill.com)
+    #         # Payments from Bill.com have billcom_id set
+    #         if (
+    #             record.is_sync_to_billcom
+    #             and record.partner_id.is_sync_to_billcom
+    #             and record.payment_type == "outbound"
+    #             and record.partner_type == "supplier"
+    #             and not record.billcom_id  # Skip if already synced from Bill.com
+    #         ):
+    #             try:
+    #                 record.with_context(skip_billcom_sync=True).button_sync_to_billcom()
+    #             except Exception as e:
+    #                 _logger.error("Error syncing payment to Bill.com: %s", str(e))
 
-        return res
+    #     return res
 
     def action_get_payment_status(self):
         """Get payment status from Bill.com"""
@@ -676,11 +680,15 @@ class AccountPayment(models.Model):
     def sync_payment_status(self):
         # Get configuration
         try:
-            config = self.env['billcom.config'].sudo().get_config()
+            config = self.env["billcom.config"].sudo().get_config()
             # Only run if the interval is greater than 0 and payment sync is enabled
-            if hasattr(config, 'payment_status_check_interval') and config.payment_status_check_interval > 0 and config.sync_payments:
+            if (
+                hasattr(config, "payment_status_check_interval")
+                and config.payment_status_check_interval > 0
+                and config.sync_payments
+            ):
                 self.update_billcom_payment_status()
             else:
-                _logger.info('Bill.com payment status check is disabled')
+                _logger.info("Bill.com payment status check is disabled")
         except Exception as e:
-            _logger.error('Error in Bill.com payment status update: %s', str(e))
+            _logger.error("Error in Bill.com payment status update: %s", str(e))

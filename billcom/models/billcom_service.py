@@ -157,28 +157,33 @@ class BillcomService(models.AbstractModel):
     def full_sync(self):
         # Get configuration
         try:
-            config = self.env['billcom.config'].sudo().get_config()
+            config = self.env["billcom.config"].sudo().get_config()
             # Only run if the interval is greater than 0
-            if hasattr(config, 'full_sync_interval') and config.full_sync_interval > 0:
+            if hasattr(config, "full_sync_interval") and config.full_sync_interval > 0:
                 self.sync_all()
             else:
-                _logger.info('Bill.com full synchronization is disabled (interval set to 0)')
+                _logger.info(
+                    "Bill.com full synchronization is disabled (interval set to 0)"
+                )
         except Exception as e:
-            _logger.error('Error in Bill.com full synchronization: %s', str(e))
+            _logger.error("Error in Bill.com full synchronization: %s", str(e))
 
     @api.model
     def payment_sync(self):
         # Get configuration
         try:
-            config = self.env['billcom.config'].sudo().get_config()
+            config = self.env["billcom.config"].sudo().get_config()
             # Only run if the interval is greater than 0 and payment sync is enabled
-            if hasattr(config, 'payment_sync_interval') and config.payment_sync_interval > 0 and config.sync_payments:
+            if (
+                hasattr(config, "payment_sync_interval")
+                and config.payment_sync_interval > 0
+                and config.sync_payments
+            ):
                 self.sync_payments()
             else:
-                _logger.info('Bill.com payment synchronization is disabled')
+                _logger.info("Bill.com payment synchronization is disabled")
         except Exception as e:
-            _logger.error('Error in Bill.com payment synchronization: %s', str(e))
-
+            _logger.error("Error in Bill.com payment synchronization: %s", str(e))
 
     @api.model
     def sync_all(self):
@@ -750,13 +755,20 @@ class BillcomService(models.AbstractModel):
 
                     # Get default vendor bill journal
                     company = vendor.company_id or self.env.company
-                    journal = self.env['account.journal'].search([
-                        ('type', '=', 'purchase'),
-                        ('company_id', '=', company.id),
-                    ], limit=1)
+                    journal = self.env["account.journal"].search(
+                        [
+                            ("type", "=", "purchase"),
+                            ("company_id", "=", company.id),
+                        ],
+                        limit=1,
+                    )
 
                     if not journal:
-                        _logger.error("No purchase journal found for company %s, skipping bill %s", company.name, bill_data["id"])
+                        _logger.error(
+                            "No purchase journal found for company %s, skipping bill %s",
+                            company.name,
+                            bill_data["id"],
+                        )
                         continue
 
                     # Create bill in Odoo
@@ -885,13 +897,20 @@ class BillcomService(models.AbstractModel):
 
                     # Get default customer invoice journal
                     company = customer.company_id or self.env.company
-                    journal = self.env['account.journal'].search([
-                        ('type', '=', 'sale'),
-                        ('company_id', '=', company.id),
-                    ], limit=1)
+                    journal = self.env["account.journal"].search(
+                        [
+                            ("type", "=", "sale"),
+                            ("company_id", "=", company.id),
+                        ],
+                        limit=1,
+                    )
 
                     if not journal:
-                        _logger.error("No sale journal found for company %s, skipping invoice %s", company.name, invoice_data["id"])
+                        _logger.error(
+                            "No sale journal found for company %s, skipping invoice %s",
+                            company.name,
+                            invoice_data["id"],
+                        )
                         continue
 
                     # Create invoice in Odoo
@@ -1252,18 +1271,19 @@ class BillcomService(models.AbstractModel):
         try:
             # Parse BILL data
             import ast
+
             billcom_data = ast.literal_eval(queue_item.sync_data)
 
             # Route to appropriate handler based on sync_type
-            if queue_item.sync_type == 'vendor':
+            if queue_item.sync_type == "vendor":
                 return self._process_vendor_from_billcom(queue_item, billcom_data)
-            elif queue_item.sync_type == 'customer':
+            elif queue_item.sync_type == "customer":
                 return self._process_customer_from_billcom(queue_item, billcom_data)
-            elif queue_item.sync_type == 'bill':
+            elif queue_item.sync_type == "bill":
                 return self._process_bill_from_billcom(queue_item, billcom_data)
-            elif queue_item.sync_type == 'invoice':
+            elif queue_item.sync_type == "invoice":
                 return self._process_invoice_from_billcom(queue_item, billcom_data)
-            elif queue_item.sync_type == 'payment':
+            elif queue_item.sync_type == "payment":
                 return self._process_payment_from_billcom(queue_item, billcom_data)
             else:
                 _logger.warning(f"Unknown sync_type: {queue_item.sync_type}")
@@ -1283,60 +1303,72 @@ class BillcomService(models.AbstractModel):
         Returns:
             bool: True if successful
         """
-        billcom_vendor_id = billcom_data.get('id')
+        billcom_vendor_id = billcom_data.get("id")
 
         # Check if vendor exists
-        partner = self.env['res.partner'].search([
-            ('billcom_id', '=', billcom_vendor_id)
-        ], limit=1)
+        partner = self.env["res.partner"].search(
+            [("billcom_id", "=", billcom_vendor_id)], limit=1
+        )
 
         # Prepare Odoo partner values from BILL data
         vals = {
-            'name': billcom_data.get('name') or billcom_data.get('companyName', 'Unknown Vendor'),
-            'supplier_rank': 1,
-            'is_sync_to_billcom': True,
-            'billcom': billcom_vendor_id,
-            'billcom_id': billcom_vendor_id,
-            'email': billcom_data.get('email'),
-            'phone': billcom_data.get('phone'),
-            'ref': billcom_data.get('accountNumber'),  # Account number if exists
-            'vat': billcom_data.get('taxId'),
-            'active': not billcom_data.get('archived', False),  # BILL uses 'archived' flag
-            'last_sync_date': fields.Datetime.now(),
-            'company_type': 'company' if billcom_data.get('accountType') == 'BUSINESS' else 'person',
+            "name": billcom_data.get("name")
+            or billcom_data.get("companyName", "Unknown Vendor"),
+            "supplier_rank": 1,
+            "is_sync_to_billcom": True,
+            "billcom": billcom_vendor_id,
+            "billcom_id": billcom_vendor_id,
+            "email": billcom_data.get("email"),
+            "phone": billcom_data.get("phone"),
+            "ref": billcom_data.get("accountNumber"),  # Account number if exists
+            "vat": billcom_data.get("taxId"),
+            "active": not billcom_data.get(
+                "archived", False
+            ),  # BILL uses 'archived' flag
+            "last_sync_date": fields.Datetime.now(),
+            "company_type": "company"
+            if billcom_data.get("accountType") == "BUSINESS"
+            else "person",
         }
 
         # Add short name as comment if exists
-        if billcom_data.get('shortName'):
-            vals['comment'] = f"Short name: {billcom_data.get('shortName')}"
+        if billcom_data.get("shortName"):
+            vals["comment"] = f"Short name: {billcom_data.get('shortName')}"
 
         # Map address - BILL API v3 uses different field names
-        address_data = billcom_data.get('address', {})
+        address_data = billcom_data.get("address", {})
         if address_data:
-            vals.update({
-                'street': address_data.get('line1') or address_data.get('addressLine1'),
-                'street2': address_data.get('line2') or address_data.get('addressLine2'),
-                'city': address_data.get('city'),
-                'zip': address_data.get('zipOrPostalCode') or address_data.get('zip'),
-            })
+            vals.update(
+                {
+                    "street": address_data.get("line1")
+                    or address_data.get("addressLine1"),
+                    "street2": address_data.get("line2")
+                    or address_data.get("addressLine2"),
+                    "city": address_data.get("city"),
+                    "zip": address_data.get("zipOrPostalCode")
+                    or address_data.get("zip"),
+                }
+            )
 
             # Map state
-            state_code = address_data.get('stateOrProvince') or address_data.get('state')
+            state_code = address_data.get("stateOrProvince") or address_data.get(
+                "state"
+            )
             if state_code:
-                state = self.env['res.country.state'].search([
-                    ('code', '=', state_code)
-                ], limit=1)
+                state = self.env["res.country.state"].search(
+                    [("code", "=", state_code)], limit=1
+                )
                 if state:
-                    vals['state_id'] = state.id
+                    vals["state_id"] = state.id
 
             # Map country
-            country_code = address_data.get('country')
+            country_code = address_data.get("country")
             if country_code:
-                country = self.env['res.country'].search([
-                    ('code', '=', country_code)
-                ], limit=1)
+                country = self.env["res.country"].search(
+                    [("code", "=", country_code)], limit=1
+                )
                 if country:
-                    vals['country_id'] = country.id
+                    vals["country_id"] = country.id
 
         # Create or update partner
         if partner:
@@ -1345,14 +1377,18 @@ class BillcomService(models.AbstractModel):
             _logger.info(f"Updated vendor {partner.name} from BILL")
         else:
             # Create new
-            partner = self.env['res.partner'].with_context(skip_billcom_sync=True).create(vals)
+            partner = (
+                self.env["res.partner"]
+                .with_context(skip_billcom_sync=True)
+                .create(vals)
+            )
             _logger.info(f"Created vendor {partner.name} from BILL")
 
         # Process bank account information if available
-        payment_info = billcom_data.get('paymentInformation', {})
-        bank_account_data = payment_info.get('bankAccount')
+        payment_info = billcom_data.get("paymentInformation", {})
+        bank_account_data = payment_info.get("bankAccount")
 
-        if bank_account_data and bank_account_data.get('routingNumber'):
+        if bank_account_data and bank_account_data.get("routingNumber"):
             self._sync_partner_bank_account(partner, bank_account_data)
 
         # Update queue item with record_id
@@ -1367,8 +1403,8 @@ class BillcomService(models.AbstractModel):
             partner: res.partner record
             bank_account_data: Bank account data from BILL
         """
-        routing_number = bank_account_data.get('routingNumber')
-        account_number = bank_account_data.get('accountNumber', '')
+        routing_number = bank_account_data.get("routingNumber")
+        account_number = bank_account_data.get("accountNumber", "")
 
         # BILL masks account numbers, so we can only update if we have full number
         # or if the account doesn't exist yet
@@ -1376,112 +1412,141 @@ class BillcomService(models.AbstractModel):
             return
 
         # Find bank by routing number
-        bank = self.env['res.bank'].search([
-            ('bic', '=', routing_number)  # In US, routing number goes in BIC field
-        ], limit=1)
+        bank = self.env["res.bank"].search(
+            [("bic", "=", routing_number)],  # In US, routing number goes in BIC field
+            limit=1,
+        )
 
         if not bank:
             # Create bank if doesn't exist
-            bank = self.env['res.bank'].create({
-                'name': bank_account_data.get('bankName', f'Bank {routing_number}'),
-                'bic': routing_number,
-            })
+            bank = self.env["res.bank"].create(
+                {
+                    "name": bank_account_data.get("bankName", f"Bank {routing_number}"),
+                    "bic": routing_number,
+                }
+            )
 
         # Check if partner already has this bank account
-        existing_bank_account = self.env['res.partner.bank'].search([
-            ('partner_id', '=', partner.id),
-            ('bank_id', '=', bank.id),
-        ], limit=1)
+        existing_bank_account = self.env["res.partner.bank"].search(
+            [
+                ("partner_id", "=", partner.id),
+                ("bank_id", "=", bank.id),
+            ],
+            limit=1,
+        )
 
         bank_vals = {
-            'partner_id': partner.id,
-            'bank_id': bank.id,
+            "partner_id": partner.id,
+            "bank_id": bank.id,
         }
 
         # Only set account number if not masked (doesn't contain *)
-        if '*' not in account_number and account_number:
-            bank_vals['acc_number'] = account_number
+        if "*" not in account_number and account_number:
+            bank_vals["acc_number"] = account_number
 
         if existing_bank_account:
             # Update existing
             existing_bank_account.write(bank_vals)
             _logger.info(f"Updated bank account for {partner.name}")
-        elif '*' not in account_number and account_number:
+        elif "*" not in account_number and account_number:
             # Only create if we have full account number
-            self.env['res.partner.bank'].create(bank_vals)
+            self.env["res.partner.bank"].create(bank_vals)
             _logger.info(f"Created bank account for {partner.name}")
 
     def _process_customer_from_billcom(self, queue_item, billcom_data):
         """Create or update customer from BILL data"""
-        billcom_customer_id = billcom_data.get('id')
+        billcom_customer_id = billcom_data.get("id")
 
         # Check if customer exists
-        partner = self.env['res.partner'].search([
-            ('billcom_id', '=', billcom_customer_id)
-        ], limit=1)
+        partner = self.env["res.partner"].search(
+            [("billcom_id", "=", billcom_customer_id)], limit=1
+        )
 
         # Prepare Odoo partner values
         # Use companyName if exists, otherwise name
-        customer_name = billcom_data.get('companyName') or billcom_data.get('name', 'Unknown Customer')
+        customer_name = billcom_data.get("companyName") or billcom_data.get(
+            "name", "Unknown Customer"
+        )
 
         vals = {
-            'name': customer_name,
-            'customer_rank': 1,
-            'is_sync_to_billcom': True,
-            'billcom': billcom_customer_id,
-            'billcom_id': billcom_customer_id,
-            'email': billcom_data.get('email'),
-            'phone': billcom_data.get('phone'),
-            'ref': billcom_data.get('accountNumber'),
-            'vat': billcom_data.get('taxId'),
-            'active': not billcom_data.get('archived', False),
-            'last_sync_date': fields.Datetime.now(),
-            'company_type': 'company' if billcom_data.get('accountType') == 'BUSINESS' else 'person',
+            "name": customer_name,
+            "customer_rank": 1,
+            "is_sync_to_billcom": True,
+            "billcom": billcom_customer_id,
+            "billcom_id": billcom_customer_id,
+            "email": billcom_data.get("email"),
+            "phone": billcom_data.get("phone"),
+            "ref": billcom_data.get("accountNumber"),
+            "vat": billcom_data.get("taxId"),
+            "active": not billcom_data.get("archived", False),
+            "last_sync_date": fields.Datetime.now(),
+            "company_type": "company"
+            if billcom_data.get("accountType") == "BUSINESS"
+            else "person",
         }
 
         # Map contact information if exists
-        contact_data = billcom_data.get('contact', {})
+        contact_data = billcom_data.get("contact", {})
         if contact_data:
-            first_name = contact_data.get('firstName', '')
-            last_name = contact_data.get('lastName', '')
+            first_name = contact_data.get("firstName", "")
+            last_name = contact_data.get("lastName", "")
             if first_name or last_name:
                 # Store contact name in a note
                 contact_name = f"{first_name} {last_name}".strip()
-                vals['comment'] = f"Contact: {contact_name}"
+                vals["comment"] = f"Contact: {contact_name}"
 
         # Add short name as additional comment if exists
-        if billcom_data.get('shortName'):
-            existing_comment = vals.get('comment', '')
-            vals['comment'] = f"{existing_comment}\nShort name: {billcom_data.get('shortName')}".strip()
+        if billcom_data.get("shortName"):
+            existing_comment = vals.get("comment", "")
+            vals[
+                "comment"
+            ] = f"{existing_comment}\nShort name: {billcom_data.get('shortName')}".strip()
 
         # Map address - Customers use 'billingAddress' instead of 'address'
-        address_data = billcom_data.get('billingAddress') or billcom_data.get('address', {})
+        address_data = billcom_data.get("billingAddress") or billcom_data.get(
+            "address", {}
+        )
         if address_data:
-            vals.update({
-                'street': address_data.get('line1') or address_data.get('addressLine1'),
-                'street2': address_data.get('line2') or address_data.get('addressLine2'),
-                'city': address_data.get('city'),
-                'zip': address_data.get('zipOrPostalCode') or address_data.get('zip'),
-            })
+            vals.update(
+                {
+                    "street": address_data.get("line1")
+                    or address_data.get("addressLine1"),
+                    "street2": address_data.get("line2")
+                    or address_data.get("addressLine2"),
+                    "city": address_data.get("city"),
+                    "zip": address_data.get("zipOrPostalCode")
+                    or address_data.get("zip"),
+                }
+            )
 
-            state_code = address_data.get('stateOrProvince') or address_data.get('state')
+            state_code = address_data.get("stateOrProvince") or address_data.get(
+                "state"
+            )
             if state_code:
-                state = self.env['res.country.state'].search([('code', '=', state_code)], limit=1)
+                state = self.env["res.country.state"].search(
+                    [("code", "=", state_code)], limit=1
+                )
                 if state:
-                    vals['state_id'] = state.id
+                    vals["state_id"] = state.id
 
-            country_code = address_data.get('country')
+            country_code = address_data.get("country")
             if country_code:
-                country = self.env['res.country'].search([('code', '=', country_code)], limit=1)
+                country = self.env["res.country"].search(
+                    [("code", "=", country_code)], limit=1
+                )
                 if country:
-                    vals['country_id'] = country.id
+                    vals["country_id"] = country.id
 
         # Create or update
         if partner:
             partner.with_context(skip_billcom_sync=True).write(vals)
             _logger.info(f"Updated customer {partner.name} from BILL")
         else:
-            partner = self.env['res.partner'].with_context(skip_billcom_sync=True).create(vals)
+            partner = (
+                self.env["res.partner"]
+                .with_context(skip_billcom_sync=True)
+                .create(vals)
+            )
             _logger.info(f"Created customer {partner.name} from BILL")
 
         queue_item.record_id = partner.id
@@ -1489,310 +1554,386 @@ class BillcomService(models.AbstractModel):
 
     def _process_bill_from_billcom(self, queue_item, billcom_data):
         """Create or update bill from BILL data"""
-        billcom_bill_id = billcom_data.get('id')
+        billcom_bill_id = billcom_data.get("id")
 
         # Check if bill exists
-        move = self.env['account.move'].search([
-            ('billcom_id', '=', billcom_bill_id)
-        ], limit=1)
+        move = self.env["account.move"].search(
+            [("billcom_id", "=", billcom_bill_id)], limit=1
+        )
 
         # Find vendor
-        vendor_billcom_id = billcom_data.get('vendorId')
-        vendor = self.env['res.partner'].search([
-            ('billcom_id', '=', vendor_billcom_id),
-            ('supplier_rank', '>', 0)
-        ], limit=1)
+        vendor_billcom_id = billcom_data.get("vendorId")
+        vendor = self.env["res.partner"].search(
+            [("billcom_id", "=", vendor_billcom_id), ("supplier_rank", ">", 0)], limit=1
+        )
 
         if not vendor:
-            _logger.error(f"Vendor with BILL ID {vendor_billcom_id} not found for bill {billcom_bill_id}")
-            raise UserError(f"Vendor must be synced first. BILL Vendor ID: {vendor_billcom_id}")
+            _logger.error(
+                f"Vendor with BILL ID {vendor_billcom_id} not found for bill {billcom_bill_id}"
+            )
+            raise UserError(
+                f"Vendor must be synced first. BILL Vendor ID: {vendor_billcom_id}"
+            )
 
         # Extract invoice data from nested object
-        invoice_data = billcom_data.get('invoice', {})
-        invoice_number = invoice_data.get('invoiceNumber', billcom_bill_id)
-        invoice_date = invoice_data.get('invoiceDate')
+        invoice_data = billcom_data.get("invoice", {})
+        invoice_number = invoice_data.get("invoiceNumber", billcom_bill_id)
+        invoice_date = invoice_data.get("invoiceDate")
 
         # Get default vendor bill journal
         company = vendor.company_id or self.env.company
-        journal = self.env['account.journal'].search([
-            ('type', '=', 'purchase'),
-            ('company_id', '=', company.id),
-        ], limit=1)
+        journal = self.env["account.journal"].search(
+            [
+                ("type", "=", "purchase"),
+                ("company_id", "=", company.id),
+            ],
+            limit=1,
+        )
 
         if not journal:
-            raise UserError(f"No purchase journal found for company {company.name}. Please configure a purchase journal.")
+            raise UserError(
+                f"No purchase journal found for company {company.name}. Please configure a purchase journal."
+            )
 
         # Prepare bill values
         vals = {
-            'move_type': 'in_invoice',
-            'partner_id': vendor.id,
-            'journal_id': journal.id,
-            'ref': invoice_number,
-            'invoice_date': invoice_date,
-            'invoice_date_due': billcom_data.get('dueDate'),
-            'narration': billcom_data.get('description'),
-            'billcom': billcom_bill_id,
-            'billcom_id': billcom_bill_id,
-            'billcom_status': billcom_data.get('paymentStatus'),  # UNPAID, PAID, etc.
-            'last_sync_date': fields.Datetime.now(),
+            "move_type": "in_invoice",
+            "partner_id": vendor.id,
+            "journal_id": journal.id,
+            "ref": invoice_number,
+            "invoice_date": invoice_date,
+            "invoice_date_due": billcom_data.get("dueDate"),
+            "narration": billcom_data.get("description"),
+            "billcom": billcom_bill_id,
+            "billcom_id": billcom_bill_id,
+            "billcom_status": billcom_data.get("paymentStatus"),  # UNPAID, PAID, etc.
+            "last_sync_date": fields.Datetime.now(),
         }
 
         # Add PO number if exists
-        if billcom_data.get('purchaseOrderNumber'):
-            po_ref = billcom_data.get('purchaseOrderNumber')
-            if vals.get('narration'):
-                vals['narration'] = f"{vals['narration']}\nPO: {po_ref}"
+        if billcom_data.get("purchaseOrderNumber"):
+            po_ref = billcom_data.get("purchaseOrderNumber")
+            if vals.get("narration"):
+                vals["narration"] = f"{vals['narration']}\nPO: {po_ref}"
             else:
-                vals['narration'] = f"PO: {po_ref}"
+                vals["narration"] = f"PO: {po_ref}"
 
         # Process line items - BILL uses 'billLineItems'
-        bill_line_items = billcom_data.get('billLineItems', [])
+        bill_line_items = billcom_data.get("billLineItems", [])
         invoice_lines = []
 
         if bill_line_items:
             # Get default expense account
-            default_account = self.env['account.account'].search([
-                ('account_type', '=', 'expense'),
-                ('company_id', '=', vendor.company_id.id or self.env.company.id),
-                ('deprecated', '=', False)
-            ], limit=1)
+            default_account = self.env["account.account"].search(
+                [
+                    ("account_type", "=", "expense"),
+                    ("company_id", "=", vendor.company_id.id or self.env.company.id),
+                    ("deprecated", "=", False),
+                ],
+                limit=1,
+            )
 
             for line in bill_line_items:
-                line_description = line.get('description', 'Bill Line Item')
-                line_amount = line.get('amount', 0.0)
+                line_description = line.get("description", "Bill Line Item")
+                line_amount = line.get("amount", 0.0)
 
                 line_vals = {
-                    'name': line_description,
-                    'quantity': 1.0,
-                    'price_unit': line_amount,
+                    "name": line_description,
+                    "quantity": 1.0,
+                    "price_unit": line_amount,
                 }
 
                 # Set account (use default if not specified)
                 if default_account:
-                    line_vals['account_id'] = default_account.id
+                    line_vals["account_id"] = default_account.id
 
                 invoice_lines.append((0, 0, line_vals))
 
         if invoice_lines:
-            vals['invoice_line_ids'] = invoice_lines
+            vals["invoice_line_ids"] = invoice_lines
         else:
             # If no line items, create a single line with the total amount
-            default_account = self.env['account.account'].search([
-                ('account_type', '=', 'expense'),
-                ('company_id', '=', vendor.company_id.id or self.env.company.id),
-                ('deprecated', '=', False)
-            ], limit=1)
+            default_account = self.env["account.account"].search(
+                [
+                    ("account_type", "=", "expense"),
+                    ("company_id", "=", vendor.company_id.id or self.env.company.id),
+                    ("deprecated", "=", False),
+                ],
+                limit=1,
+            )
 
             if default_account:
-                vals['invoice_line_ids'] = [(0, 0, {
-                    'name': billcom_data.get('description') or 'Bill from BILL.com',
-                    'quantity': 1.0,
-                    'price_unit': billcom_data.get('amount', 0.0),
-                    'account_id': default_account.id,
-                })]
+                vals["invoice_line_ids"] = [
+                    (
+                        0,
+                        0,
+                        {
+                            "name": billcom_data.get("description")
+                            or "Bill from BILL.com",
+                            "quantity": 1.0,
+                            "price_unit": billcom_data.get("amount", 0.0),
+                            "account_id": default_account.id,
+                        },
+                    )
+                ]
 
         # Create or update
         if move:
             # Only update if in draft
-            if move.state == 'draft':
+            if move.state == "draft":
                 move.with_context(skip_billcom_sync=True).write(vals)
                 _logger.info(f"Updated bill {move.name} from BILL")
             else:
                 _logger.info(f"Bill {move.name} already posted, skipping update")
         else:
-            move = self.env['account.move'].with_context(skip_billcom_sync=True).create(vals)
-            _logger.info(f"Created bill {move.name} from BILL (Invoice #: {invoice_number})")
+            move = (
+                self.env["account.move"]
+                .with_context(skip_billcom_sync=True)
+                .create(vals)
+            )
+            _logger.info(
+                f"Created bill {move.name} from BILL (Invoice #: {invoice_number})"
+            )
 
         queue_item.record_id = move.id
         return True
 
     def _process_invoice_from_billcom(self, queue_item, billcom_data):
         """Create or update customer invoice from BILL data"""
-        billcom_invoice_id = billcom_data.get('id')
+        billcom_invoice_id = billcom_data.get("id")
 
         # Check if invoice exists
-        move = self.env['account.move'].search([
-            ('billcom_id', '=', billcom_invoice_id)
-        ], limit=1)
+        move = self.env["account.move"].search(
+            [("billcom_id", "=", billcom_invoice_id)], limit=1
+        )
 
-        # Find customer - BILL API v3 uses nested customer object
-        customer_data = billcom_data.get('customer', {})
-        customer_billcom_id = customer_data.get('id') if isinstance(customer_data, dict) else billcom_data.get('customerId')
+        # Find customer - BILL API v3 returns customerId directly (not nested)
+        # Format: { "customerId": "0cu02TXNTXPYFNI16n6b", ... }
+        customer_billcom_id = billcom_data.get("customerId")
+
+        # Fallback: Try nested customer object (in case API changes or uses different format)
+        customer_data = billcom_data.get("customer", {})
+        if not customer_billcom_id and isinstance(customer_data, dict):
+            customer_billcom_id = customer_data.get("id")
 
         # Try to find customer by BILL ID
         customer = None
         if customer_billcom_id:
-            customer = self.env['res.partner'].search([
-                ('billcom_id', '=', customer_billcom_id),
-                ('customer_rank', '>', 0)
-            ], limit=1)
+            customer = self.env["res.partner"].search(
+                [("billcom_id", "=", customer_billcom_id), ("customer_rank", ">", 0)],
+                limit=1,
+            )
 
         # If no customer ID or not found, try by email or name
+        # (though invoice API doesn't typically include customer details beyond customerId)
         if not customer:
-            customer_email = customer_data.get('email') if isinstance(customer_data, dict) else billcom_data.get('email')
-            customer_name = customer_data.get('name') if isinstance(customer_data, dict) else billcom_data.get('name')
+            customer_email = customer_data.get("email") if customer_data else None
+            customer_name = customer_data.get("name") if customer_data else None
 
             if customer_email:
-                customer = self.env['res.partner'].search([
-                    ('email', '=', customer_email),
-                    ('customer_rank', '>', 0)
-                ], limit=1)
+                customer = self.env["res.partner"].search(
+                    [("email", "=", customer_email), ("customer_rank", ">", 0)], limit=1
+                )
 
             if not customer and customer_name:
-                customer = self.env['res.partner'].search([
-                    ('name', '=', customer_name),
-                    ('customer_rank', '>', 0)
-                ], limit=1)
+                customer = self.env["res.partner"].search(
+                    [("name", "=", customer_name), ("customer_rank", ">", 0)], limit=1
+                )
 
         if not customer:
-            _logger.error(f"Customer not found for invoice {billcom_invoice_id}. BILL Customer ID: {customer_billcom_id}, Email: {customer_data.get('email')}, Name: {customer_data.get('name')}")
-            raise UserError(f"Customer must be synced first or created manually. BILL Customer ID: {customer_billcom_id}")
+            _logger.error(
+                "Customer not found for invoice %s. "
+                "BILL Customer ID: %s. "
+                "Please sync customers from Bill.com first.",
+                billcom_invoice_id,
+                customer_billcom_id or "None",
+            )
+            raise UserError(
+                f"Customer with Bill.com ID '{customer_billcom_id}' not found in Odoo.\n\n"
+                f"Please sync customers from Bill.com first using the sync wizard,\n"
+                f"or create the customer manually and set their Bill.com ID."
+            )
 
         # Extract invoice data - for invoices, data is at top level (not nested like bills)
-        invoice_number = billcom_data.get('invoiceNumber', billcom_invoice_id)
-        invoice_date = billcom_data.get('invoiceDate')
+        invoice_number = billcom_data.get("invoiceNumber", billcom_invoice_id)
+        invoice_date = billcom_data.get("invoiceDate")
 
         # Get default customer invoice journal
         company = customer.company_id or self.env.company
-        journal = self.env['account.journal'].search([
-            ('type', '=', 'sale'),
-            ('company_id', '=', company.id),
-        ], limit=1)
+        journal = self.env["account.journal"].search(
+            [
+                ("type", "=", "sale"),
+                ("company_id", "=", company.id),
+            ],
+            limit=1,
+        )
 
         if not journal:
-            raise UserError(f"No sale journal found for company {company.name}. Please configure a sale journal.")
+            raise UserError(
+                f"No sale journal found for company {company.name}. Please configure a sale journal."
+            )
 
         # Prepare invoice values
         vals = {
-            'move_type': 'out_invoice',
-            'partner_id': customer.id,
-            'journal_id': journal.id,
-            'ref': invoice_number,
-            'invoice_date': invoice_date,
-            'invoice_date_due': billcom_data.get('dueDate'),
-            'narration': billcom_data.get('description'),
-            'billcom': billcom_invoice_id,
-            'billcom_id': billcom_invoice_id,
-            'billcom_status': billcom_data.get('status'),  # OPEN, PAID, etc.
-            'last_sync_date': fields.Datetime.now(),
+            "move_type": "out_invoice",
+            "partner_id": customer.id,
+            "journal_id": journal.id,
+            "ref": invoice_number,
+            "invoice_date": invoice_date,
+            "invoice_date_due": billcom_data.get("dueDate"),
+            "narration": billcom_data.get("description"),
+            "billcom": billcom_invoice_id,
+            "billcom_id": billcom_invoice_id,
+            "billcom_status": billcom_data.get("status"),  # OPEN, PAID, etc.
+            "last_sync_date": fields.Datetime.now(),
         }
 
         # Process line items - BILL uses 'invoiceLineItems' for customer invoices
-        invoice_line_items = billcom_data.get('invoiceLineItems', [])
+        invoice_line_items = billcom_data.get("invoiceLineItems", [])
         invoice_lines = []
 
         if invoice_line_items:
             # Get default income account
-            default_account = self.env['account.account'].search([
-                ('account_type', '=', 'income'),
-                ('company_id', '=', customer.company_id.id or self.env.company.id),
-                ('deprecated', '=', False)
-            ], limit=1)
+            default_account = self.env["account.account"].search(
+                [
+                    ("account_type", "=", "income"),
+                    ("company_id", "=", customer.company_id.id or self.env.company.id),
+                    ("deprecated", "=", False),
+                ],
+                limit=1,
+            )
 
             for line in invoice_line_items:
-                line_description = line.get('description', 'Invoice Line Item')
-                line_amount = line.get('amount', 0.0)
-                line_quantity = line.get('quantity', 1.0)
+                line_description = line.get("description", "Invoice Line Item")
+                line_amount = line.get("amount", 0.0)
+                line_quantity = line.get("quantity", 1.0)
 
                 line_vals = {
-                    'name': line_description,
-                    'quantity': line_quantity,
-                    'price_unit': line_amount,
+                    "name": line_description,
+                    "quantity": line_quantity,
+                    "price_unit": line_amount,
                 }
 
                 # Set account (use default if not specified)
                 if default_account:
-                    line_vals['account_id'] = default_account.id
+                    line_vals["account_id"] = default_account.id
 
                 invoice_lines.append((0, 0, line_vals))
 
         if invoice_lines:
-            vals['invoice_line_ids'] = invoice_lines
+            vals["invoice_line_ids"] = invoice_lines
         else:
             # If no line items, create a single line with the total amount
-            default_account = self.env['account.account'].search([
-                ('account_type', '=', 'income'),
-                ('company_id', '=', customer.company_id.id or self.env.company.id),
-                ('deprecated', '=', False)
-            ], limit=1)
+            default_account = self.env["account.account"].search(
+                [
+                    ("account_type", "=", "income"),
+                    ("company_id", "=", customer.company_id.id or self.env.company.id),
+                    ("deprecated", "=", False),
+                ],
+                limit=1,
+            )
 
             if default_account:
-                vals['invoice_line_ids'] = [(0, 0, {
-                    'name': billcom_data.get('description') or 'Invoice from BILL.com',
-                    'quantity': 1.0,
-                    'price_unit': billcom_data.get('amount', 0.0),
-                    'account_id': default_account.id,
-                })]
+                vals["invoice_line_ids"] = [
+                    (
+                        0,
+                        0,
+                        {
+                            "name": billcom_data.get("description")
+                            or "Invoice from BILL.com",
+                            "quantity": 1.0,
+                            "price_unit": billcom_data.get("amount", 0.0),
+                            "account_id": default_account.id,
+                        },
+                    )
+                ]
 
         # Create or update
         if move:
             # Only update if in draft
-            if move.state == 'draft':
+            if move.state == "draft":
                 move.with_context(skip_billcom_sync=True).write(vals)
                 _logger.info(f"Updated invoice {move.name} from BILL")
             else:
                 _logger.info(f"Invoice {move.name} already posted, skipping update")
         else:
-            move = self.env['account.move'].with_context(skip_billcom_sync=True).create(vals)
-            _logger.info(f"Created invoice {move.name} from BILL (Invoice #: {invoice_number})")
+            move = (
+                self.env["account.move"]
+                .with_context(skip_billcom_sync=True)
+                .create(vals)
+            )
+            _logger.info(
+                f"Created invoice {move.name} from BILL (Invoice #: {invoice_number})"
+            )
 
         queue_item.record_id = move.id
         return True
 
     def _process_payment_from_billcom(self, queue_item, billcom_data):
         """Create or update payment from BILL data"""
-        billcom_payment_id = billcom_data.get('id')
+        billcom_payment_id = billcom_data.get("id")
 
         # Check if payment exists
-        payment = self.env['account.payment'].search([
-            ('billcom_id', '=', billcom_payment_id)
-        ], limit=1)
+        payment = self.env["account.payment"].search(
+            [("billcom_id", "=", billcom_payment_id)], limit=1
+        )
 
         # Find vendor
-        vendor_billcom_id = billcom_data.get('vendorId')
-        vendor = self.env['res.partner'].search([
-            ('billcom_id', '=', vendor_billcom_id),
-            ('supplier_rank', '>', 0)
-        ], limit=1)
+        vendor_billcom_id = billcom_data.get("vendorId")
+        vendor = self.env["res.partner"].search(
+            [("billcom_id", "=", vendor_billcom_id), ("supplier_rank", ">", 0)], limit=1
+        )
 
         if not vendor:
-            _logger.error(f"Vendor with BILL ID {vendor_billcom_id} not found for payment {billcom_payment_id}")
-            raise UserError(f"Vendor must be synced first. BILL Vendor ID: {vendor_billcom_id}")
+            _logger.error(
+                f"Vendor with BILL ID {vendor_billcom_id} not found for payment {billcom_payment_id}"
+            )
+            raise UserError(
+                f"Vendor must be synced first. BILL Vendor ID: {vendor_billcom_id}"
+            )
 
         # Find default journal for vendor payments
-        journal = self.env['account.journal'].search([
-            ('type', '=', 'bank'),
-            ('company_id', '=', vendor.company_id.id or self.env.company.id)
-        ], limit=1)
+        journal = self.env["account.journal"].search(
+            [
+                ("type", "=", "bank"),
+                ("company_id", "=", vendor.company_id.id or self.env.company.id),
+            ],
+            limit=1,
+        )
 
         if not journal:
             raise UserError("No bank journal found for payments")
 
         # Prepare payment values
         vals = {
-            'payment_type': 'outbound',
-            'partner_type': 'supplier',
-            'partner_id': vendor.id,
-            'amount': billcom_data.get('amount', 0.0),
-            'date': billcom_data.get('paymentDate') or fields.Date.today(),
-            'journal_id': journal.id,
-            'ref': billcom_data.get('description') or f"Payment from BILL {billcom_payment_id}",
-            'billcom': billcom_payment_id,
-            'billcom_id': billcom_payment_id,
-            'billcom_status': billcom_data.get('status'),
-            'last_sync_date': fields.Datetime.now(),
+            "payment_type": "outbound",
+            "partner_type": "supplier",
+            "partner_id": vendor.id,
+            "amount": billcom_data.get("amount", 0.0),
+            "date": billcom_data.get("paymentDate") or fields.Date.today(),
+            "journal_id": journal.id,
+            "ref": billcom_data.get("description")
+            or f"Payment from BILL {billcom_payment_id}",
+            "billcom": billcom_payment_id,
+            "billcom_id": billcom_payment_id,
+            "billcom_status": billcom_data.get("status"),
+            "last_sync_date": fields.Datetime.now(),
         }
 
         # Create or update
         if payment:
             # Only update if in draft
-            if payment.state == 'draft':
+            if payment.state == "draft":
                 payment.with_context(skip_billcom_sync=True).write(vals)
                 _logger.info(f"Updated payment {payment.name} from BILL")
             else:
                 _logger.info(f"Payment {payment.name} already posted, skipping update")
         else:
-            payment = self.env['account.payment'].with_context(skip_billcom_sync=True).create(vals)
+            payment = (
+                self.env["account.payment"]
+                .with_context(skip_billcom_sync=True)
+                .create(vals)
+            )
             _logger.info(f"Created payment {payment.name} from BILL")
 
         queue_item.record_id = payment.id
@@ -1820,12 +1961,14 @@ class BillcomService(models.AbstractModel):
             _logger.info("Fetching funding accounts from Bill.com")
 
             # GET /v3/funding-accounts/banks
-            response = self._make_request('funding-accounts/banks', method='GET')
+            response = self._make_request("funding-accounts/banks", method="GET")
 
             # Bill.com API v3 returns data in 'results' array
-            funding_accounts = response.get('results', []) if response else []
+            funding_accounts = response.get("results", []) if response else []
 
-            _logger.info(f"Retrieved {len(funding_accounts)} funding accounts from Bill.com")
+            _logger.info(
+                f"Retrieved {len(funding_accounts)} funding accounts from Bill.com"
+            )
 
             return funding_accounts
 
@@ -1834,7 +1977,7 @@ class BillcomService(models.AbstractModel):
             raise UserError(f"Failed to fetch funding accounts from Bill.com: {str(e)}")
 
     @api.model
-    def get_default_funding_account(self, account_type='payables'):
+    def get_default_funding_account(self, account_type="payables"):
         """
         Get the default funding account for payables or receivables
 
@@ -1849,8 +1992,8 @@ class BillcomService(models.AbstractModel):
 
             # Find default account for the specified type
             for account in funding_accounts:
-                if account.get('status') == 'VERIFIED':
-                    default_settings = account.get('default', {})
+                if account.get("status") == "VERIFIED":
+                    default_settings = account.get("default", {})
                     if default_settings.get(account_type, False):
                         _logger.info(
                             f"Found default {account_type} funding account: "
@@ -1860,7 +2003,7 @@ class BillcomService(models.AbstractModel):
 
             # If no default found, return first verified account
             for account in funding_accounts:
-                if account.get('status') == 'VERIFIED':
+                if account.get("status") == "VERIFIED":
                     _logger.warning(
                         f"No default {account_type} account found, "
                         f"using first verified: {account.get('bankName')}"
@@ -1931,7 +2074,7 @@ class BillcomService(models.AbstractModel):
             _logger.error("Failed to generate MFA challenge: %s", str(e))
             _logger.error("Request URL: %s", challenge_url)
             _logger.error("Request headers: %s", headers)
-            if hasattr(e, 'response') and e.response is not None:
+            if hasattr(e, "response") and e.response is not None:
                 _logger.error("Response status: %s", e.response.status_code)
                 _logger.error("Response body: %s", e.response.text)
             raise UserError(_("Failed to generate MFA challenge: %s") % str(e))
@@ -2034,10 +2177,14 @@ class BillcomService(models.AbstractModel):
 
             # Get detailed error from response
             error_detail = str(e)
-            if hasattr(e, 'response') and e.response is not None:
+            if hasattr(e, "response") and e.response is not None:
                 try:
                     error_json = e.response.json()
-                    error_detail = error_json.get('message') or error_json.get('error') or str(error_json)
+                    error_detail = (
+                        error_json.get("message")
+                        or error_json.get("error")
+                        or str(error_json)
+                    )
                     _logger.error("Bill.com error details: %s", error_json)
                 except:
                     error_detail = e.response.text or str(e)
@@ -2051,13 +2198,378 @@ class BillcomService(models.AbstractModel):
                     _("MFA code expired. Please request a new code and try again.")
                 )
             elif "too many" in error_msg or "bdc_1358" in error_msg:
-                raise UserError(_(
-                    "Too many MFA validation attempts.\n\n"
-                    "Bill.com has temporarily blocked MFA validation.\n\n"
-                    "Solutions:\n"
-                    "1. Wait 5-10 minutes and try 'Setup MFA' again\n"
-                    "2. Use manual Device ID method (see MFA_QUICK_GUIDE.md)\n"
-                    "3. Contact Bill.com support to unlock"
-                ))
+                raise UserError(
+                    _(
+                        "Too many MFA validation attempts.\n\n"
+                        "Bill.com has temporarily blocked MFA validation.\n\n"
+                        "Solutions:\n"
+                        "1. Wait 5-10 minutes and try 'Setup MFA' again\n"
+                        "2. Use manual Device ID method (see MFA_QUICK_GUIDE.md)\n"
+                        "3. Contact Bill.com support to unlock"
+                    )
+                )
             else:
                 raise UserError(_("MFA validation failed: %s") % error_detail)
+
+    # ========================================================================
+    # PARTNER SYNCHRONIZATION FROM BILL.COM TO ODOO
+    # ========================================================================
+
+    @api.model
+    def sync_partners_from_billcom(self, partner_type="vendor"):
+        """Sync partners from Bill.com to Odoo (bulk sync)
+
+        Args:
+            partner_type (str): 'vendor' or 'customer'
+
+        Returns:
+            int: Number of partners synced
+        """
+        try:
+            config = self._get_config()
+        except UserError as e:
+            _logger.warning(str(e))
+            return 0
+
+        # Check if sync is enabled for this partner type
+        if partner_type == "vendor" and not config.sync_vendors:
+            _logger.info("Vendor synchronization is disabled")
+            return 0
+        elif partner_type == "customer" and not config.sync_customers:
+            _logger.info("Customer synchronization is disabled")
+            return 0
+
+        endpoint = "vendors" if partner_type == "vendor" else "customers"
+
+        try:
+            # Get partners from Bill.com API
+            result = self._make_request(endpoint, method="GET")
+            partners = result.get("data", [])
+            synced_count = 0
+
+            for partner_data in partners:
+                try:
+                    # Find existing partner in Odoo
+                    existing_partner = self.env["res.partner"].search(
+                        [("billcom", "=", partner_data["id"])], limit=1
+                    )
+
+                    address = partner_data.get("address", {})
+                    partner_vals = {
+                        "name": partner_data["name"],
+                        "email": partner_data.get("email", ""),
+                        "phone": partner_data.get("phone", ""),
+                        "street": address.get("line1", ""),
+                        "street2": address.get("line2", ""),
+                        "city": address.get("city", ""),
+                        "zip": address.get("zipOrPostalCode", ""),
+                        "billcom": partner_data["id"],
+                        "billcom_id": partner_data["id"],
+                        "last_sync_date": fields.Datetime.now(),
+                        "ref": partner_data.get("shortName", ""),
+                        "lang": partner_data.get("language", "en_US"),
+                        "is_sync_to_billcom": True,
+                    }
+
+                    # Set partner type ranks
+                    if partner_type == "vendor":
+                        partner_vals["supplier_rank"] = 1
+                        partner_vals["customer_rank"] = 0
+                    else:
+                        partner_vals["supplier_rank"] = 0
+                        partner_vals["customer_rank"] = 1
+
+                    # Set state if available
+                    if address.get("stateOrProvince"):
+                        state = self.env["res.country.state"].search(
+                            [("code", "=", address["stateOrProvince"])], limit=1
+                        )
+                        if state:
+                            partner_vals["state_id"] = state.id
+
+                    # Set country if available
+                    if address.get("country"):
+                        country = self.env["res.country"].search(
+                            [("code", "=", address["country"])], limit=1
+                        )
+                        if country:
+                            partner_vals["country_id"] = country.id
+
+                    # Update or create partner
+                    if existing_partner:
+                        existing_partner.with_context(skip_billcom_sync=True).write(
+                            partner_vals
+                        )
+                        _logger.info(
+                            "Updated %s: %s from Bill.com",
+                            partner_type,
+                            partner_data["name"],
+                        )
+                        partner_to_use = existing_partner
+                    else:
+                        partner_to_use = (
+                            self.env["res.partner"]
+                            .with_context(skip_billcom_sync=True)
+                            .create(partner_vals)
+                        )
+                        _logger.info(
+                            "Created %s: %s from Bill.com",
+                            partner_type,
+                            partner_data["name"],
+                        )
+
+                    synced_count += 1
+
+                    # Sync bank account for vendors
+                    if partner_type == "vendor" and partner_to_use.billcom:
+                        try:
+                            bank_result = self._make_request(
+                                f"vendors/{partner_to_use.billcom}/bank-account",
+                                method="GET",
+                            )
+
+                            if bank_result and bank_result.get("bankAccount"):
+                                bank_info = bank_result.get("bankAccount", {})
+
+                                # Check if bank account already exists
+                                existing_bank = False
+                                if partner_to_use.bank_ids:
+                                    for bank in partner_to_use.bank_ids:
+                                        if bank.acc_number == bank_info.get(
+                                            "accountNumber"
+                                        ):
+                                            existing_bank = True
+                                            break
+
+                                # Create bank account if it doesn't exist
+                                if not existing_bank:
+                                    bank_vals = {
+                                        "acc_number": bank_info.get(
+                                            "accountNumber", ""
+                                        ),
+                                        "aba_routing": bank_info.get(
+                                            "routingNumber", ""
+                                        ),
+                                        "acc_holder_name": bank_info.get(
+                                            "nameOnAccount", partner_to_use.name
+                                        ),
+                                        "partner_id": partner_to_use.id,
+                                    }
+
+                                    # Find bank by routing number
+                                    if bank_info.get("routingNumber"):
+                                        bank_id = self.env["res.bank"].search(
+                                            [
+                                                (
+                                                    "aba_routing",
+                                                    "=",
+                                                    bank_info.get("routingNumber"),
+                                                )
+                                            ],
+                                            limit=1,
+                                        )
+                                        if bank_id:
+                                            bank_vals["bank_id"] = bank_id.id
+
+                                    self.env["res.partner.bank"].create(bank_vals)
+                                    _logger.info(
+                                        "Created bank account for vendor %s from Bill.com",
+                                        partner_to_use.name,
+                                    )
+                        except Exception as e:
+                            # 404 means no bank account exists, which is fine
+                            if "404" not in str(e):
+                                _logger.warning(
+                                    "Error syncing bank account for vendor %s: %s",
+                                    partner_to_use.name,
+                                    str(e),
+                                )
+
+                except Exception as e:
+                    _logger.error(
+                        "Error processing %s %s: %s",
+                        partner_type,
+                        partner_data.get("name", "Unknown"),
+                        str(e),
+                    )
+                    continue
+
+            _logger.info("Synced %d %ss from Bill.com", synced_count, partner_type)
+            return synced_count
+
+        except Exception as e:
+            _logger.error("Error syncing %ss from Bill.com: %s", partner_type, str(e))
+            raise UserError(
+                _("Error syncing %ss from Bill.com: %s") % (partner_type, str(e))
+            )
+
+    @api.model
+    def sync_partners_cron(self):
+        """Cron job to sync partners from Bill.com
+
+        Returns:
+            bool: True if sync completed successfully
+        """
+        try:
+            # Get config and check if auto sync is enabled
+            try:
+                config = self._get_config()
+                if (
+                    hasattr(config, "auto_sync_enabled")
+                    and not config.auto_sync_enabled
+                ):
+                    _logger.info("Automatic sync is disabled in configuration")
+                    return False
+            except UserError as e:
+                _logger.warning(str(e))
+                return False
+
+            # Sync vendors if enabled
+            if config.sync_vendors:
+                try:
+                    vendor_count = self.sync_partners_from_billcom(
+                        partner_type="vendor"
+                    )
+                    _logger.info(
+                        "Cron job synced %s vendors from Bill.com", vendor_count or 0
+                    )
+                except Exception as e:
+                    _logger.error("Error in vendor sync cron: %s", str(e))
+
+            # Sync customers if enabled
+            if config.sync_customers:
+                try:
+                    customer_count = self.sync_partners_from_billcom(
+                        partner_type="customer"
+                    )
+                    _logger.info(
+                        "Cron job synced %s customers from Bill.com",
+                        customer_count or 0,
+                    )
+                except Exception as e:
+                    _logger.error("Error in customer sync cron: %s", str(e))
+
+            return True
+        except Exception as e:
+            _logger.error("Error in partner sync cron: %s", str(e))
+            return False
+
+    @api.model
+    def sync_partner_from_billcom_by_id(self, billcom_id, partner_type="vendor"):
+        """Sync a specific partner from Bill.com by ID
+
+        Args:
+            billcom_id (str): Bill.com partner ID
+            partner_type (str): 'vendor' or 'customer'
+
+        Returns:
+            res.partner: Synced partner record or False
+        """
+        try:
+            config = self._get_config()
+        except UserError as e:
+            _logger.warning(str(e))
+            return False
+
+        # Check if sync is enabled for this partner type
+        if partner_type == "vendor" and not config.sync_vendors:
+            _logger.info("Vendor synchronization is disabled")
+            return False
+        elif partner_type == "customer" and not config.sync_customers:
+            _logger.info("Customer synchronization is disabled")
+            return False
+
+        endpoint = (
+            f"{'vendors' if partner_type == 'vendor' else 'customers'}/{billcom_id}"
+        )
+
+        try:
+            # Get partner data from Bill.com
+            partner_data = self._make_request(endpoint, method="GET")
+
+            if not partner_data or partner_data.get("status") == "error":
+                _logger.warning("Partner not found in Bill.com with ID: %s", billcom_id)
+                return False
+
+            # Find existing partner or create new one
+            existing_partner = self.env["res.partner"].search(
+                [("billcom_id", "=", billcom_id)], limit=1
+            )
+            if not existing_partner:
+                existing_partner = self.env["res.partner"].search(
+                    [("billcom", "=", billcom_id)], limit=1
+                )
+
+            address = partner_data.get("address", {})
+            partner_vals = {
+                "name": partner_data.get("name", "Unknown"),
+                "email": partner_data.get("email", ""),
+                "phone": partner_data.get("phone", ""),
+                "street": address.get("line1", ""),
+                "street2": address.get("line2", ""),
+                "city": address.get("city", ""),
+                "zip": address.get("zipOrPostalCode", ""),
+                "billcom_id": billcom_id,
+                "billcom": billcom_id,
+                "last_sync_date": fields.Datetime.now(),
+                "ref": partner_data.get("shortName", ""),
+                "is_sync_to_billcom": True,
+                "billcom_sync_state": "synced",
+            }
+
+            # Set partner type
+            if partner_type == "vendor":
+                partner_vals["supplier_rank"] = 1
+                partner_vals["customer_rank"] = 0
+            else:
+                partner_vals["supplier_rank"] = 0
+                partner_vals["customer_rank"] = 1
+
+            # Set state/country
+            if address.get("stateOrProvince"):
+                state = self.env["res.country.state"].search(
+                    [("code", "=", address["stateOrProvince"])], limit=1
+                )
+                if state:
+                    partner_vals["state_id"] = state.id
+
+            if address.get("country"):
+                country = self.env["res.country"].search(
+                    [("code", "=", address["country"])], limit=1
+                )
+                if country:
+                    partner_vals["country_id"] = country.id
+
+            if existing_partner:
+                existing_partner.with_context(skip_billcom_sync=True).write(
+                    partner_vals
+                )
+                _logger.info(
+                    "Updated %s: %s from Bill.com",
+                    partner_type,
+                    partner_data.get("name"),
+                )
+                return existing_partner
+            else:
+                new_partner = (
+                    self.env["res.partner"]
+                    .with_context(skip_billcom_sync=True)
+                    .create(partner_vals)
+                )
+                _logger.info(
+                    "Created %s: %s from Bill.com",
+                    partner_type,
+                    partner_data.get("name"),
+                )
+                return new_partner
+
+        except Exception as e:
+            _logger.error(
+                "Error syncing %s %s from Bill.com: %s",
+                partner_type,
+                billcom_id,
+                str(e),
+            )
+            if existing_partner:
+                existing_partner.billcom_sync_state = "error"
+            return False

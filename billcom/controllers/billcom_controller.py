@@ -7,7 +7,6 @@ from odoo import fields, http
 from odoo.exceptions import UserError, ValidationError
 from odoo.http import request
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -33,11 +32,18 @@ class BillComController(http.Controller):
         if not organization_id:
             return None
 
-        config = request.env["billcom.config"].sudo().search([
-            ("organization_id", "=", organization_id),
-            ("active", "=", True),
-            ("enable_webhooks", "=", True),
-        ], limit=1)
+        config = (
+            request.env["billcom.config"]
+            .sudo()
+            .search(
+                [
+                    ("organization_id", "=", organization_id),
+                    ("active", "=", True),
+                    ("enable_webhooks", "=", True),
+                ],
+                limit=1,
+            )
+        )
 
         return config
 
@@ -109,23 +115,30 @@ class BillComController(http.Controller):
             return
 
         if event_type == "bill.archived":
-            move = request.env["account.move"].sudo().search([
-                '|',
-                ('billcom_id', '=', entity_id),
-                ('billcom', '=', entity_id)
-            ], limit=1)
+            move = (
+                request.env["account.move"]
+                .sudo()
+                .search(
+                    ["|", ("billcom_id", "=", entity_id), ("billcom", "=", entity_id)],
+                    limit=1,
+                )
+            )
             if move:
-                move.with_context(skip_billcom_sync=True).write({'active': False})
+                move.with_context(skip_billcom_sync=True).write({"active": False})
                 _logger.info("Archived bill %s in Odoo", entity_id)
 
         elif event_type == "bill.restored":
-            move = request.env["account.move"].sudo().with_context(active_test=False).search([
-                '|',
-                ('billcom_id', '=', entity_id),
-                ('billcom', '=', entity_id)
-            ], limit=1)
+            move = (
+                request.env["account.move"]
+                .sudo()
+                .with_context(active_test=False)
+                .search(
+                    ["|", ("billcom_id", "=", entity_id), ("billcom", "=", entity_id)],
+                    limit=1,
+                )
+            )
             if move:
-                move.with_context(skip_billcom_sync=True).write({'active': True})
+                move.with_context(skip_billcom_sync=True).write({"active": True})
                 _logger.info("Restored bill %s in Odoo", entity_id)
 
         else:
@@ -147,23 +160,30 @@ class BillComController(http.Controller):
             return
 
         if event_type == "vendor.archived":
-            partner = request.env["res.partner"].sudo().search([
-                '|',
-                ('billcom_id', '=', entity_id),
-                ('billcom', '=', entity_id)
-            ], limit=1)
+            partner = (
+                request.env["res.partner"]
+                .sudo()
+                .search(
+                    ["|", ("billcom_id", "=", entity_id), ("billcom", "=", entity_id)],
+                    limit=1,
+                )
+            )
             if partner:
-                partner.with_context(skip_billcom_sync=True).write({'active': False})
+                partner.with_context(skip_billcom_sync=True).write({"active": False})
                 _logger.info("Archived vendor %s in Odoo", entity_id)
 
         elif event_type == "vendor.restored":
-            partner = request.env["res.partner"].sudo().with_context(active_test=False).search([
-                '|',
-                ('billcom_id', '=', entity_id),
-                ('billcom', '=', entity_id)
-            ], limit=1)
+            partner = (
+                request.env["res.partner"]
+                .sudo()
+                .with_context(active_test=False)
+                .search(
+                    ["|", ("billcom_id", "=", entity_id), ("billcom", "=", entity_id)],
+                    limit=1,
+                )
+            )
             if partner:
-                partner.with_context(skip_billcom_sync=True).write({'active': True})
+                partner.with_context(skip_billcom_sync=True).write({"active": True})
                 _logger.info("Restored vendor %s in Odoo", entity_id)
 
         else:
@@ -172,16 +192,15 @@ class BillComController(http.Controller):
             partner_model = request.env["res.partner"].sudo()
 
             # Find existing partner
-            existing_partner = partner_model.search([
-                '|',
-                ('billcom_id', '=', entity_id),
-                ('billcom', '=', entity_id)
-            ], limit=1)
+            existing_partner = partner_model.search(
+                ["|", ("billcom_id", "=", entity_id), ("billcom", "=", entity_id)],
+                limit=1,
+            )
 
             # Prepare partner values from webhook data
             address = entity_data.get("address", {})
-            payment_info = entity_data.get("paymentInformation", {})
-            additional_info = entity_data.get("additionalInfo", {})
+            entity_data.get("paymentInformation", {})
+            entity_data.get("additionalInfo", {})
 
             partner_vals = {
                 "name": entity_data.get("name", "Unknown"),
@@ -194,7 +213,8 @@ class BillComController(http.Controller):
                 "billcom_id": entity_id,
                 "billcom": entity_id,
                 "last_sync_date": fields.Datetime.now(),
-                "ref": entity_data.get("accountNumber") or entity_data.get("shortName", ""),
+                "ref": entity_data.get("accountNumber")
+                or entity_data.get("shortName", ""),
                 "is_sync_to_billcom": True,
                 "billcom_sync_state": "synced",
                 "supplier_rank": 1,
@@ -205,21 +225,27 @@ class BillComController(http.Controller):
 
             # Set state/country
             if address.get("stateOrProvince"):
-                state = request.env["res.country.state"].sudo().search([
-                    ("code", "=", address["stateOrProvince"])
-                ], limit=1)
+                state = (
+                    request.env["res.country.state"]
+                    .sudo()
+                    .search([("code", "=", address["stateOrProvince"])], limit=1)
+                )
                 if state:
                     partner_vals["state_id"] = state.id
 
             if address.get("country"):
-                country = request.env["res.country"].sudo().search([
-                    ("code", "=", address["country"])
-                ], limit=1)
+                country = (
+                    request.env["res.country"]
+                    .sudo()
+                    .search([("code", "=", address["country"])], limit=1)
+                )
                 if country:
                     partner_vals["country_id"] = country.id
 
             if existing_partner:
-                existing_partner.with_context(skip_billcom_sync=True).write(partner_vals)
+                existing_partner.with_context(skip_billcom_sync=True).write(
+                    partner_vals
+                )
                 _logger.info("Updated vendor %s from webhook", entity_data.get("name"))
             else:
                 partner_model.with_context(skip_billcom_sync=True).create(partner_vals)
@@ -316,7 +342,7 @@ class BillComController(http.Controller):
             "Payment failed for vendor %s (transaction: %s). Errors: %s",
             vendor_info.get("name", "Unknown"),
             transaction_number,
-            "; ".join(error_messages)
+            "; ".join(error_messages),
         )
 
         # TODO: Optionally create activity/log in Odoo for failed payment
@@ -339,7 +365,7 @@ class BillComController(http.Controller):
             entity_id,
             payment_status,
             vendor_info.get("name"),
-            len(bill_ids)
+            len(bill_ids),
         )
 
         # Log detailed payment information
@@ -350,7 +376,7 @@ class BillComController(http.Controller):
                 entity_id,
                 arrives_by,
                 funding.get("amount"),
-                funding.get("currency", "USD")
+                funding.get("currency", "USD"),
             )
         elif payment_status == "PROCESSED":
             disbursement_account = disbursement.get("disbursementAccount", {})
@@ -358,24 +384,31 @@ class BillComController(http.Controller):
                 "Payment %s processed - Disbursement type: %s, Account: %s",
                 entity_id,
                 disbursement_account.get("type"),
-                disbursement_account.get("accountNumber", "N/A")
+                disbursement_account.get("accountNumber", "N/A"),
             )
 
         # Try to process with existing method if available
         try:
-            result = request.env["account.payment"].sudo().process_billcom_payment_webhook(
-                payment_data
+            result = (
+                request.env["account.payment"]
+                .sudo()
+                .process_billcom_payment_webhook(payment_data)
             )
             if result:
-                _logger.info("Successfully processed payment webhook for ID: %s", entity_id)
+                _logger.info(
+                    "Successfully processed payment webhook for ID: %s", entity_id
+                )
             else:
-                _logger.warning("process_billcom_payment_webhook returned False for ID: %s", entity_id)
+                _logger.warning(
+                    "process_billcom_payment_webhook returned False for ID: %s",
+                    entity_id,
+                )
         except AttributeError:
             # Method doesn't exist yet, just log the webhook data
             _logger.info(
                 "Payment webhook processed (logging only): %s - %s",
                 entity_id,
-                payment_status
+                payment_status,
             )
 
     def _handle_bank_account_webhook(self, event_type, entity_id, entity_data, config):
@@ -409,7 +442,7 @@ class BillComController(http.Controller):
             bank_account_id,
             status,
             archived,
-            name_on_account
+            name_on_account,
         )
 
         if event_type == "bank-account.created":
@@ -418,7 +451,7 @@ class BillComController(http.Controller):
                 bank_name,
                 account_type,
                 owner_type,
-                account_number
+                account_number,
             )
 
         elif event_type == "bank-account.updated":
@@ -428,30 +461,29 @@ class BillComController(http.Controller):
                     "Bank account %s VERIFIED and activated - %s at %s",
                     bank_account_id,
                     name_on_account,
-                    bank_name
+                    bank_name,
                 )
             elif status == "NOT_VERIFIED" and archived:
                 _logger.warning(
                     "Bank account %s verification FAILED - account archived",
-                    bank_account_id
+                    bank_account_id,
                 )
             elif status in ("PENDING", "EXPIRED", "BLOCKED") and archived:
                 _logger.warning(
                     "Bank account %s status: %s - account archived",
                     bank_account_id,
-                    status
+                    status,
                 )
 
             # Log default settings changes
             if default_settings.get("payables"):
                 _logger.info(
-                    "Bank account %s set as DEFAULT for PAYABLES (AP)",
-                    bank_account_id
+                    "Bank account %s set as DEFAULT for PAYABLES (AP)", bank_account_id
                 )
             if default_settings.get("receivables"):
                 _logger.info(
                     "Bank account %s set as DEFAULT for RECEIVABLES (AR)",
-                    bank_account_id
+                    bank_account_id,
                 )
 
         elif event_type == "bank-account.archived":
@@ -459,7 +491,7 @@ class BillComController(http.Controller):
                 "Bank account %s archived - %s at %s",
                 bank_account_id,
                 name_on_account,
-                bank_name
+                bank_name,
             )
 
         # TODO: Optionally sync to Odoo res.partner.bank
@@ -486,7 +518,7 @@ class BillComController(http.Controller):
         """
         webhook_log = None
         try:
-            data = request.dispatcher.jsonrequest
+            data = request.get_json_data()
             _logger.info("Received Bill.com webhook: %s", json.dumps(data, indent=2))
 
             # Extract webhook data (event type, organization ID, entity ID, etc.)
@@ -518,7 +550,9 @@ class BillComController(http.Controller):
             # Check for idempotency - prevent duplicate processing
             webhook_log_model = request.env["billcom.webhook.log"].sudo()
             if webhook_log_model.check_duplicate(idempotency_key):
-                _logger.info("Duplicate webhook %s - already processed", idempotency_key)
+                _logger.info(
+                    "Duplicate webhook %s - already processed", idempotency_key
+                )
                 return {
                     "success": True,
                     "message": f"Webhook {idempotency_key} already processed",
@@ -566,17 +600,17 @@ class BillComController(http.Controller):
 
         except ValidationError as ve:
             _logger.error("Validation error in webhook: %s", str(ve))
-            if 'webhook_log' in locals():
+            if webhook_log:
                 webhook_log.mark_error(f"Validation error: {str(ve)}")
             return self._handle_error(ve)
         except UserError as ue:
             _logger.error("User error in webhook: %s", str(ue))
-            if 'webhook_log' in locals():
+            if webhook_log:
                 webhook_log.mark_error(f"User error: {str(ue)}")
             return self._handle_error(ue)
         except Exception as e:
             _logger.error("Unexpected error in webhook: %s", str(e), exc_info=True)
-            if 'webhook_log' in locals():
+            if webhook_log:
                 webhook_log.mark_error(f"Unexpected error: {str(e)}")
             return self._handle_error(e)
 

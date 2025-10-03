@@ -18,16 +18,16 @@
             <xpath expr="//sheet/notebook" position="inside">
                 <page
                     string="Bill.com Integration"
-                    name="billcom"
+                    name="billcom_id"
                     attrs="{'invisible': [('move_type', 'not in', ['in_invoice', 'out_invoice'])]}"
                 >
                     <group>
                         <group>
                             <field name="is_sync_to_billcom" />
                             <field
-                                name="billcom"
+                                name="billcom_id"
                                 readonly="1"
-                                attrs="{'invisible': [('billcom', '=', False)]}"
+                                attrs="{'invisible': [('billcom_id', '=', False)]}"
                             />
                             <field
                                 name="last_sync_date"
@@ -106,7 +106,7 @@
         <field name="arch" type="xml">
             <field name="name" position="after">
                 <field name="is_sync_to_billcom" optional="hide" />
-                <field name="billcom" optional="hide" />
+                <field name="billcom_id" optional="hide" />
                 <field name="last_sync_date" optional="hide" />
             </field>
         </field>

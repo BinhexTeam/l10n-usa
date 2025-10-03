@@ -41,15 +41,15 @@ class BillcomConfig(models.Model):
     mfa_device_id = fields.Char(
         string="MFA Device ID",
         help="Trusted Device ID from Bill.com for MFA-free payment creation. "
-             "Required for creating payments via API. "
-             "See MFA_PAYMENT_ISSUE.md for setup instructions.",
+        "Required for creating payments via API. "
+        "See MFA_PAYMENT_ISSUE.md for setup instructions.",
         tracking=True,
     )
     mfa_remember_me_id = fields.Char(
         string="MFA Remember Me ID",
         help="30-day MFA ID for step-up authentication. "
-             "Generated from MFA challenge/validate with rememberMe=true. "
-             "Use 'Setup MFA' button to obtain this automatically.",
+        "Generated from MFA challenge/validate with rememberMe=true. "
+        "Use 'Setup MFA' button to obtain this automatically.",
         tracking=True,
     )
     mfa_device_name = fields.Char(
@@ -280,6 +280,16 @@ class BillcomConfig(models.Model):
         compute="_compute_dashboard_metrics", string="Pending Payments"
     )
 
+    total_invoices = fields.Integer(
+        compute="_compute_dashboard_metrics", string="Total Invoices"
+    )
+    synced_invoices = fields.Integer(
+        compute="_compute_dashboard_metrics", string="Synced Invoices"
+    )
+    pending_invoices = fields.Integer(
+        compute="_compute_dashboard_metrics", string="Pending Invoices"
+    )
+
     queue_pending = fields.Integer(
         compute="_compute_dashboard_metrics", string="Queue Pending"
     )
@@ -400,10 +410,13 @@ class BillcomConfig(models.Model):
             funding_account_model = self.env["billcom.funding.account"]
             result = funding_account_model.sync_funding_accounts_from_billcom()
 
-            synced_count = result.get('synced', 0)
-            total_count = result.get('total', 0)
+            synced_count = result.get("synced", 0)
+            total_count = result.get("total", 0)
 
-            message = _("Successfully synchronized %d of %d funding accounts") % (synced_count, total_count)
+            message = _("Successfully synchronized %d of %d funding accounts") % (
+                synced_count,
+                total_count,
+            )
 
             return {
                 "type": "ir.actions.client",
@@ -426,7 +439,11 @@ class BillcomConfig(models.Model):
         self.ensure_one()
 
         # Sync funding accounts
-        result = self.env["billcom.funding.account"].sudo().sync_funding_accounts_from_billcom()
+        result = (
+            self.env["billcom.funding.account"]
+            .sudo()
+            .sync_funding_accounts_from_billcom()
+        )
 
         return {
             "type": "ir.actions.client",
@@ -573,6 +590,19 @@ class BillcomConfig(models.Model):
             config.synced_payments = len(payments.filtered(lambda p: p.billcom_id))
             config.pending_payments = len(payments.filtered(lambda p: not p.billcom_id))
 
+            # Invoices metrics
+            invoices = self.env["account.move"].search(
+                [
+                    ("company_id", "=", config.company_id.id),
+                    ("move_type", "=", "out_invoice"),
+                ]
+            )
+            config.total_invoices = len(invoices)
+            config.synced_invoices = len(invoices.filtered(lambda inv: inv.billcom_id))
+            config.pending_invoices = len(
+                invoices.filtered(lambda inv: not inv.billcom_id)
+            )
+
             # Queue metrics
             queue_items = self.env["billcom.sync.queue"].search(
                 [("config_id", "=", config.id)]
@@ -626,6 +656,9 @@ class BillcomConfig(models.Model):
                     "total_payments": config.total_payments,
                     "synced_payments": config.synced_payments,
                     "pending_payments": config.pending_payments,
+                    "total_invoices": config.total_invoices,
+                    "synced_invoices": config.synced_invoices,
+                    "pending_invoices": config.pending_invoices,
                     "queue_pending": config.queue_pending,
                     "queue_processing": config.queue_processing,
                     "queue_completed": config.queue_completed,
@@ -794,6 +827,97 @@ class BillcomConfig(models.Model):
             "target": "current",
         }
 
+    def action_open_invoices(self):
+        """Open invoices list"""
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Customer Invoices",
+            "res_model": "account.move",
+            "view_mode": "tree,form",
+            "domain": [
+                ("company_id", "=", self.company_id.id),
+                ("move_type", "=", "out_invoice"),
+            ],
+            "target": "current",
+        }
+
+    def action_open_vendors_from_billcom(self):
+        """Open vendors synced from Bill.com"""
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Vendors from Bill.com",
+            "res_model": "res.partner",
+            "view_mode": "tree,form",
+            "domain": [
+                ("company_id", "=", self.company_id.id),
+                ("supplier_rank", ">", 0),
+                ("billcom_id", "!=", False),
+            ],
+            "target": "current",
+            "context": {"default_supplier_rank": 1},
+        }
+
+    def action_open_customers_from_billcom(self):
+        """Open customers synced from Bill.com"""
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Customers from Bill.com",
+            "res_model": "res.partner",
+            "view_mode": "tree,form",
+            "domain": [
+                ("company_id", "=", self.company_id.id),
+                ("customer_rank", ">", 0),
+                ("billcom_id", "!=", False),
+            ],
+            "target": "current",
+            "context": {"default_customer_rank": 1},
+        }
+
+    def action_open_bills_from_billcom(self):
+        """Open bills synced from Bill.com"""
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Bills from Bill.com",
+            "res_model": "account.move",
+            "view_mode": "tree,form",
+            "domain": [
+                ("company_id", "=", self.company_id.id),
+                ("move_type", "=", "in_invoice"),
+                ("billcom_id", "!=", False),
+            ],
+            "target": "current",
+        }
+
+    def action_open_invoices_from_billcom(self):
+        """Open invoices synced from Bill.com"""
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Invoices from Bill.com",
+            "res_model": "account.move",
+            "view_mode": "tree,form",
+            "domain": [
+                ("company_id", "=", self.company_id.id),
+                ("move_type", "=", "out_invoice"),
+                ("billcom_id", "!=", False),
+            ],
+            "target": "current",
+        }
+
+    def action_open_payments_from_billcom(self):
+        """Open payments synced from Bill.com"""
+        return {
+            "type": "ir.actions.act_window",
+            "name": "Payments from Bill.com",
+            "res_model": "account.payment",
+            "view_mode": "tree,form",
+            "domain": [
+                ("company_id", "=", self.company_id.id),
+                ("payment_type", "=", "outbound"),
+                ("billcom_id", "!=", False),
+            ],
+            "target": "current",
+        }
+
     @api.depends("company_id")
     def _compute_webhook_url(self):
         """Compute the webhook URL for Bill.com
@@ -816,33 +940,41 @@ class BillcomConfig(models.Model):
         events = []
 
         if self.webhook_event_bills:
-            events.extend([
-                "bill.created",
-                "bill.updated",
-                "bill.archived",
-                "bill.restored",
-            ])
+            events.extend(
+                [
+                    "bill.created",
+                    "bill.updated",
+                    "bill.archived",
+                    "bill.restored",
+                ]
+            )
 
         if self.webhook_event_vendors:
-            events.extend([
-                "vendor.created",
-                "vendor.updated",
-                "vendor.archived",
-                "vendor.restored",
-            ])
+            events.extend(
+                [
+                    "vendor.created",
+                    "vendor.updated",
+                    "vendor.archived",
+                    "vendor.restored",
+                ]
+            )
 
         if self.webhook_event_payments:
-            events.extend([
-                "payment.updated",
-                "payment.failed",
-            ])
+            events.extend(
+                [
+                    "payment.updated",
+                    "payment.failed",
+                ]
+            )
 
         if self.webhook_event_bank_accounts:
-            events.extend([
-                "bank-account.created",
-                "bank-account.updated",
-                "bank-account.archived",
-            ])
+            events.extend(
+                [
+                    "bank-account.created",
+                    "bank-account.updated",
+                    "bank-account.archived",
+                ]
+            )
 
         return events
 
@@ -858,33 +990,41 @@ class BillcomConfig(models.Model):
         # Using version "1" as per Bill.com API documentation
 
         if self.webhook_event_bills:
-            event_objects.extend([
-                {"type": "bill.created", "version": "1"},
-                {"type": "bill.updated", "version": "1"},
-                {"type": "bill.archived", "version": "1"},
-                {"type": "bill.restored", "version": "1"},
-            ])
+            event_objects.extend(
+                [
+                    {"type": "bill.created", "version": "1"},
+                    {"type": "bill.updated", "version": "1"},
+                    {"type": "bill.archived", "version": "1"},
+                    {"type": "bill.restored", "version": "1"},
+                ]
+            )
 
         if self.webhook_event_vendors:
-            event_objects.extend([
-                {"type": "vendor.created", "version": "1"},
-                {"type": "vendor.updated", "version": "1"},
-                {"type": "vendor.archived", "version": "1"},
-                {"type": "vendor.restored", "version": "1"},
-            ])
+            event_objects.extend(
+                [
+                    {"type": "vendor.created", "version": "1"},
+                    {"type": "vendor.updated", "version": "1"},
+                    {"type": "vendor.archived", "version": "1"},
+                    {"type": "vendor.restored", "version": "1"},
+                ]
+            )
 
         if self.webhook_event_payments:
-            event_objects.extend([
-                {"type": "payment.updated", "version": "1"},
-                {"type": "payment.failed", "version": "1"},
-            ])
+            event_objects.extend(
+                [
+                    {"type": "payment.updated", "version": "1"},
+                    {"type": "payment.failed", "version": "1"},
+                ]
+            )
 
         if self.webhook_event_bank_accounts:
-            event_objects.extend([
-                {"type": "bank-account.created", "version": "1"},
-                {"type": "bank-account.updated", "version": "1"},
-                {"type": "bank-account.archived", "version": "1"},
-            ])
+            event_objects.extend(
+                [
+                    {"type": "bank-account.created", "version": "1"},
+                    {"type": "bank-account.updated", "version": "1"},
+                    {"type": "bank-account.archived", "version": "1"},
+                ]
+            )
 
         return event_objects
 
@@ -907,6 +1047,7 @@ class BillcomConfig(models.Model):
 
             # Generate idempotency key (UUID4)
             import uuid
+
             idempotency_key = str(uuid.uuid4())
 
             # Call Bill.com API to create subscription
@@ -915,9 +1056,7 @@ class BillcomConfig(models.Model):
             # Bill.com API v3 subscription format (correct format from API docs)
             subscription_data = {
                 "name": f"Odoo Webhook - {self.company_id.name}",
-                "status": {
-                    "enabled": True
-                },
+                "status": {"enabled": True},
                 "events": event_objects,
                 "notificationUrl": self.webhook_url,
             }
@@ -940,12 +1079,14 @@ class BillcomConfig(models.Model):
                 # Bill.com generates the securityKey (not we send it)
                 security_key = response.get("securityKey")
 
-                self.write({
-                    "webhook_subscription_id": response.get("id"),
-                    "webhook_secret": security_key,  # Store Bill.com's security key
-                    "webhook_subscription_state": "subscribed",
-                    "webhook_last_error": False,
-                })
+                self.write(
+                    {
+                        "webhook_subscription_id": response.get("id"),
+                        "webhook_secret": security_key,  # Store Bill.com's security key
+                        "webhook_subscription_state": "subscribed",
+                        "webhook_last_error": False,
+                    }
+                )
 
                 _logger.info(
                     "Webhook subscription created successfully: %s", response.get("id")
@@ -971,10 +1112,12 @@ class BillcomConfig(models.Model):
             error_msg = str(e)
             _logger.error("Error subscribing to webhooks: %s", error_msg)
 
-            self.write({
-                "webhook_subscription_state": "error",
-                "webhook_last_error": error_msg,
-            })
+            self.write(
+                {
+                    "webhook_subscription_state": "error",
+                    "webhook_last_error": error_msg,
+                }
+            )
 
             raise UserError(_("Failed to subscribe to webhooks: %s") % error_msg)
 
@@ -994,11 +1137,13 @@ class BillcomConfig(models.Model):
                 method="DELETE",
             )
 
-            self.write({
-                "webhook_subscription_id": False,
-                "webhook_subscription_state": "not_subscribed",
-                "webhook_last_error": False,
-            })
+            self.write(
+                {
+                    "webhook_subscription_id": False,
+                    "webhook_subscription_state": "not_subscribed",
+                    "webhook_last_error": False,
+                }
+            )
 
             return {
                 "type": "ir.actions.client",
@@ -1015,10 +1160,12 @@ class BillcomConfig(models.Model):
             error_msg = str(e)
             _logger.error("Error unsubscribing from webhooks: %s", error_msg)
 
-            self.write({
-                "webhook_subscription_state": "error",
-                "webhook_last_error": error_msg,
-            })
+            self.write(
+                {
+                    "webhook_subscription_state": "error",
+                    "webhook_last_error": error_msg,
+                }
+            )
 
             raise UserError(_("Failed to unsubscribe from webhooks: %s") % error_msg)
 
@@ -1090,11 +1237,13 @@ class BillcomConfig(models.Model):
                         "Subscription %s not found in Bill.com - marking as error",
                         self.webhook_subscription_id,
                     )
-                    self.write({
-                        "webhook_subscription_state": "error",
-                        "webhook_last_error": "Subscription not found in Bill.com. "
-                        "It may have been deleted manually.",
-                    })
+                    self.write(
+                        {
+                            "webhook_subscription_state": "error",
+                            "webhook_last_error": "Subscription not found in Bill.com. "
+                            "It may have been deleted manually.",
+                        }
+                    )
 
                 return {
                     "type": "ir.actions.client",
@@ -1117,11 +1266,13 @@ class BillcomConfig(models.Model):
 
             if self.webhook_subscription_id and not our_subscription:
                 # Our subscription ID doesn't exist in Bill.com
-                self.write({
-                    "webhook_subscription_state": "error",
-                    "webhook_last_error": "Subscription ID not found in Bill.com. "
-                    "It may have been deleted. Please unsubscribe and re-subscribe.",
-                })
+                self.write(
+                    {
+                        "webhook_subscription_state": "error",
+                        "webhook_last_error": "Subscription ID not found in Bill.com. "
+                        "It may have been deleted. Please unsubscribe and re-subscribe.",
+                    }
+                )
 
                 return {
                     "type": "ir.actions.client",
@@ -1152,10 +1303,12 @@ class BillcomConfig(models.Model):
                     )
 
                 # Update state to subscribed if everything is OK
-                self.write({
-                    "webhook_subscription_state": "subscribed",
-                    "webhook_last_error": False,
-                })
+                self.write(
+                    {
+                        "webhook_subscription_state": "subscribed",
+                        "webhook_last_error": False,
+                    }
+                )
 
                 message = _("Subscription verified successfully in Bill.com")
             else:
@@ -1174,11 +1327,13 @@ class BillcomConfig(models.Model):
                             orphan.get("id"),
                         )
 
-                        self.write({
-                            "webhook_subscription_id": orphan.get("id"),
-                            "webhook_subscription_state": "subscribed",
-                            "webhook_last_error": False,
-                        })
+                        self.write(
+                            {
+                                "webhook_subscription_id": orphan.get("id"),
+                                "webhook_subscription_state": "subscribed",
+                                "webhook_last_error": False,
+                            }
+                        )
 
                         message = _(
                             "Found and adopted orphaned subscription: %s"
@@ -1209,10 +1364,12 @@ class BillcomConfig(models.Model):
             error_msg = str(e)
             _logger.error("Error syncing webhook status: %s", error_msg)
 
-            self.write({
-                "webhook_subscription_state": "error",
-                "webhook_last_error": error_msg,
-            })
+            self.write(
+                {
+                    "webhook_subscription_state": "error",
+                    "webhook_last_error": error_msg,
+                }
+            )
 
             raise UserError(_("Failed to sync webhook status: %s") % error_msg)
 

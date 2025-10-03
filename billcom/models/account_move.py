@@ -83,14 +83,10 @@ class AccountMove(models.Model):
         # Build invoice data according to Bill.com API v3 format
         # Only include required fields - API calculates totalAmount and assigns status
         invoice_data = {
-            "customer": {
-                "id": self.partner_id.billcom_id or self.partner_id.billcom
-            },
+            "customer": {"id": self.partner_id.billcom_id or self.partner_id.billcom},
             "invoiceLineItems": lines,
             "invoiceNumber": self.name or "",
-            "processingOptions": {
-                "sendEmail": False  # Don't send email by default
-            },
+            "processingOptions": {"sendEmail": False},  # Don't send email by default
         }
 
         # Add dueDate if available
@@ -136,7 +132,7 @@ class AccountMove(models.Model):
                 "Error searching for existing %s with number %s: %s",
                 endpoint,
                 document_number,
-                str(e)
+                str(e),
             )
             return None
 
@@ -174,12 +170,14 @@ class AccountMove(models.Model):
                         "Found existing %s in Bill.com with number %s (ID: %s)",
                         endpoint,
                         self.name,
-                        existing_id
+                        existing_id,
                     )
 
             if existing_id:
                 # Update existing document
-                _logger.info("Updating existing %s with ID %s in Bill.com", endpoint, existing_id)
+                _logger.info(
+                    "Updating existing %s with ID %s in Bill.com", endpoint, existing_id
+                )
                 result = self.env["billcom.service"]._make_request(
                     f"{endpoint}/{existing_id}", method="PUT", data=data
                 )
@@ -230,25 +228,25 @@ class AccountMove(models.Model):
         except Exception as e:
             _logger.error("Error in document sync cron: %s", str(e))
 
-    def write(self, vals):
-        """Override write to sync changes to Bill.com"""
-        res = super().write(vals)
-        if self.env.context.get("skip_billcom_sync"):
-            return res
+    # def write(self, vals):
+    #     """Override write to sync changes to Bill.com"""
+    #     res = super().write(vals)
+    #     if self.name == '/' or self.env.context.get("skip_billcom_sync"):
+    #         return res
 
-        for record in self:
-            # Only sync if record was created in Odoo (not from Bill.com)
-            # Records from Bill.com have billcom_id set
-            if (
-                record.is_sync_to_billcom
-                and record.partner_id.is_sync_to_billcom
-                and record.move_type in ["in_invoice", "out_invoice"]
-                and not record.billcom_id  # Skip if already synced from Bill.com
-            ):
-                try:
-                    record.with_context(skip_billcom_sync=True).button_sync_to_billcom()
-                except Exception as e:
-                    _logger.error("Error syncing document to Bill.com: %s", str(e))
+    #     for record in self:
+    #         # Only sync if record was created in Odoo (not from Bill.com)
+    #         # Records from Bill.com have billcom_id set
+    #         if (
+    #             record.is_sync_to_billcom
+    #             and record.partner_id.is_sync_to_billcom
+    #             and record.move_type in ["in_invoice", "out_invoice"]
+    #             and not record.billcom_id  # Skip if already synced from Bill.com
+    #         ):
+    #             try:
+    #                 record.with_context(skip_billcom_sync=True).button_sync_to_billcom()
+    #             except Exception as e:
+    #                 _logger.error("Error syncing document to Bill.com: %s", str(e))
 
     @api.model
     def sync_from_billcom(self, billcom_id):
@@ -266,11 +264,10 @@ class AccountMove(models.Model):
 
         try:
             # Search for existing document with this Bill.com ID
-            move = self.search([
-                '|',
-                ('billcom_id', '=', billcom_id),
-                ('billcom', '=', billcom_id)
-            ], limit=1)
+            move = self.search(
+                ["|", ("billcom_id", "=", billcom_id), ("billcom", "=", billcom_id)],
+                limit=1,
+            )
 
             # Determine if it's a bill or invoice by trying both endpoints
             service = self.env["billcom.service"].sudo()
@@ -279,8 +276,10 @@ class AccountMove(models.Model):
 
             # Try bills endpoint first
             try:
-                document_data = service._make_request(f"bills/{billcom_id}", method="GET")
-                if document_data and document_data.get('id'):
+                document_data = service._make_request(
+                    f"bills/{billcom_id}", method="GET"
+                )
+                if document_data and document_data.get("id"):
                     endpoint = "bills"
                     move_type = "in_invoice"
             except Exception:
@@ -289,8 +288,10 @@ class AccountMove(models.Model):
             # If not a bill, try invoices endpoint
             if not document_data:
                 try:
-                    document_data = service._make_request(f"invoices/{billcom_id}", method="GET")
-                    if document_data and document_data.get('id'):
+                    document_data = service._make_request(
+                        f"invoices/{billcom_id}", method="GET"
+                    )
+                    if document_data and document_data.get("id"):
                         endpoint = "invoices"
                         move_type = "out_invoice"
                 except Exception:
@@ -305,23 +306,37 @@ class AccountMove(models.Model):
             # Extract partner information
             partner_id = None
             if endpoint == "bills":
-                vendor_id = document_data.get('vendorId')
+                vendor_id = document_data.get("vendorId")
                 if vendor_id:
-                    partner = self.env['res.partner'].sudo().search([
-                        '|',
-                        ('billcom_id', '=', vendor_id),
-                        ('billcom', '=', vendor_id)
-                    ], limit=1)
+                    partner = (
+                        self.env["res.partner"]
+                        .sudo()
+                        .search(
+                            [
+                                "|",
+                                ("billcom_id", "=", vendor_id),
+                                ("billcom", "=", vendor_id),
+                            ],
+                            limit=1,
+                        )
+                    )
                     if partner:
                         partner_id = partner.id
             elif endpoint == "invoices":
-                customer_id = document_data.get('customerId')
+                customer_id = document_data.get("customerId")
                 if customer_id:
-                    partner = self.env['res.partner'].sudo().search([
-                        '|',
-                        ('billcom_id', '=', customer_id),
-                        ('billcom', '=', customer_id)
-                    ], limit=1)
+                    partner = (
+                        self.env["res.partner"]
+                        .sudo()
+                        .search(
+                            [
+                                "|",
+                                ("billcom_id", "=", customer_id),
+                                ("billcom", "=", customer_id),
+                            ],
+                            limit=1,
+                        )
+                    )
                     if partner:
                         partner_id = partner.id
 
@@ -330,17 +345,17 @@ class AccountMove(models.Model):
                 return False
 
             # Prepare values for create/update
-            invoice_info = document_data.get('invoice', {})
+            invoice_info = document_data.get("invoice", {})
             vals = {
-                'move_type': move_type,
-                'partner_id': partner_id,
-                'billcom_id': billcom_id,
-                'billcom': billcom_id,
-                'billcom_status': document_data.get('paymentStatus'),
-                'ref': invoice_info.get('invoiceNumber', ''),
-                'invoice_date': invoice_info.get('invoiceDate'),
-                'invoice_date_due': document_data.get('dueDate'),
-                'last_sync_date': fields.Datetime.now(),
+                "move_type": move_type,
+                "partner_id": partner_id,
+                "billcom_id": billcom_id,
+                "billcom": billcom_id,
+                "billcom_status": document_data.get("paymentStatus"),
+                "ref": invoice_info.get("invoiceNumber", ""),
+                "invoice_date": invoice_info.get("invoiceDate"),
+                "invoice_date_due": document_data.get("dueDate"),
+                "last_sync_date": fields.Datetime.now(),
             }
 
             # Create or update the move
@@ -350,7 +365,7 @@ class AccountMove(models.Model):
                 _logger.info("Updated existing %s in Odoo: %s", endpoint, move.name)
             else:
                 # Create new move
-                vals['is_sync_to_billcom'] = False  # Prevent sync back to Bill.com
+                vals["is_sync_to_billcom"] = False  # Prevent sync back to Bill.com
                 move = self.with_context(skip_billcom_sync=True).create(vals)
                 _logger.info("Created new %s in Odoo: %s", endpoint, move.name)
 

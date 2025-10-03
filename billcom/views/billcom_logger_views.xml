@@ -6,7 +6,6 @@
         <field name="model">billcom.logger</field>
         <field name="arch" type="xml">
             <tree
-                string="Bill.com Logs"
                 decoration-success="status == 'success'"
                 decoration-danger="status == 'error'"
                 decoration-warning="status == 'warning'"

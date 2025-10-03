@@ -55,7 +55,9 @@ class BillcomServiceAbstract(models.AbstractModel):
             and config.token_expiry
             and config.token_expiry > fields.Datetime.now()
         ):
-            _logger.debug("Using existing valid token (expires: %s)", config.token_expiry)
+            _logger.debug(
+                "Using existing valid token (expires: %s)", config.token_expiry
+            )
             return config.token
 
         _logger.info("Token missing or expired - requesting new token from Bill.com")
@@ -81,7 +83,9 @@ class BillcomServiceAbstract(models.AbstractModel):
             # Include trusted device ID for MFA-free authentication if configured
             if config.mfa_device_id:
                 payload["deviceId"] = config.mfa_device_id
-                _logger.info("Authenticating with trusted device ID for MFA-free session")
+                _logger.info(
+                    "Authenticating with trusted device ID for MFA-free session"
+                )
 
             headers = {"accept": "application/json", "content-type": "application/json"}
 
@@ -114,44 +118,50 @@ class BillcomServiceAbstract(models.AbstractModel):
             if result.get("mfaRequired") and not result.get("sessionId"):
                 if config.mfa_device_id:
                     # Device ID was provided but not trusted
-                    _logger.error("MFA Device ID '%s' is not trusted or has expired", config.mfa_device_id)
-                    raise UserError(_(
-                        "MFA Device ID is not trusted or has expired.\n\n"
-                        "Please:\n"
-                        "1. Login to Bill.com web interface\n"
-                        "2. Complete MFA and mark 'Trust this device'\n"
-                        "3. Update the Device ID in this configuration\n\n"
-                        "Or contact Bill.com support to obtain a trusted device ID."
-                    ))
+                    _logger.error(
+                        "MFA Device ID '%s' is not trusted or has expired",
+                        config.mfa_device_id,
+                    )
+                    raise UserError(
+                        _(
+                            "MFA Device ID is not trusted or has expired.\n\n"
+                            "Please:\n"
+                            "1. Login to Bill.com web interface\n"
+                            "2. Complete MFA and mark 'Trust this device'\n"
+                            "3. Update the Device ID in this configuration\n\n"
+                            "Or contact Bill.com support to obtain a trusted device ID."
+                        )
+                    )
                 else:
                     # No device ID configured
-                    _logger.error("MFA required but no Device ID configured for payment creation")
-                    raise UserError(_(
-                        "MFA-trusted session required for payment creation.\n\n"
-                        "Bill.com requires MFA authentication for creating payments.\n\n"
-                        "To enable automatic payments:\n"
-                        "1. Obtain a trusted Device ID from Bill.com\n"
-                        "2. Configure it in the 'MFA Device ID' field\n\n"
-                        "See documentation: MFA_PAYMENT_ISSUE.md"
-                    ))
+                    _logger.error(
+                        "MFA required but no Device ID configured for payment creation"
+                    )
+                    raise UserError(
+                        _(
+                            "MFA-trusted session required for payment creation.\n\n"
+                            "Bill.com requires MFA authentication for creating payments.\n\n"
+                            "To enable automatic payments:\n"
+                            "1. Obtain a trusted Device ID from Bill.com\n"
+                            "2. Configure it in the 'MFA Device ID' field\n\n"
+                            "See documentation: MFA_PAYMENT_ISSUE.md"
+                        )
+                    )
 
             # Successful authentication
             if not result.get("sessionId"):
                 raise UserError(_("No session ID received from Bill.com API"))
 
-            session_id = result.get("sessionId")
+            result.get("sessionId")
 
             _logger.info(
                 "Successfully authenticated with Bill.com API v3 (%s environment)",
                 config.environment,
             )
 
-            # Perform MFA step-up if remember_me_id is configured
-            # This marks the session as MFA-trusted for payment creation
-            if not config.mfa_device_id and config.mfa_remember_me_id:
-                _logger.info("Performing MFA step-up to mark session as trusted")
-                self._mfa_step_up(config, session_id)
-                # If step-up fails, exception will be raised and token won't be stored
+            # Note: MFA step-up is NOT performed here automatically
+            # It will only be performed when needed (e.g., creating payments)
+            # See _get_mfa_token() for MFA-specific token retrieval
 
             # Store the token in the config
             token_expiry = fields.Datetime.now() + timedelta(hours=1)
@@ -200,7 +210,50 @@ class BillcomServiceAbstract(models.AbstractModel):
             ) from e
 
     @api.model
-    def _make_request(self, endpoint, method="GET", data=None, params=None, extra_headers=None):
+    def _get_mfa_token(self):
+        """Get MFA-trusted token for payment operations
+
+        This method ensures the session has MFA trust by:
+        1. Getting regular token (or using cached one)
+        2. Checking if rememberMeId is configured
+        3. Checking MFA status via GET /v3/login/session
+        4. Performing step-up if needed
+
+        ONLY call this for operations requiring MFA (e.g., POST /v3/payments)
+
+        Returns:
+            str: MFA-trusted session ID
+
+        Raises:
+            UserError: If MFA configuration is missing or step-up fails
+        """
+        config = self._get_config()
+
+        # Get regular token first (will use cached if valid)
+        token = self._get_token()
+
+        # Check if we have rememberMeId for step-up
+        if not config.mfa_remember_me_id:
+            _logger.error("MFA required for payment but rememberMeId not configured")
+            raise UserError(
+                _(
+                    "MFA authentication is required for payment creation.\n\n"
+                    "Please use 'Setup MFA' button to configure MFA.\n\n"
+                    "See documentation: claudedocs/MFA_QUICK_GUIDE.md"
+                )
+            )
+
+        # Perform MFA step-up (will check status first and skip if already COMPLETE)
+        _logger.info("Payment operation requested - ensuring MFA-trusted session")
+        self._mfa_step_up(config, token)
+
+        _logger.info("✅ MFA-trusted token ready for payment operation")
+        return token
+
+    @api.model
+    def _make_request(
+        self, endpoint, method="GET", data=None, params=None, extra_headers=None
+    ):
         """Make a request to Bill.com API v3 with retry logic"""
         config = self._get_config()
         max_retries, retry_delay = self._get_retry_config(config)
@@ -208,7 +261,14 @@ class BillcomServiceAbstract(models.AbstractModel):
         for retry_count in range(max_retries + 1):
             try:
                 return self._execute_request(
-                    endpoint, method, data, params, config, retry_count, max_retries, extra_headers
+                    endpoint,
+                    method,
+                    data,
+                    params,
+                    config,
+                    retry_count,
+                    max_retries,
+                    extra_headers,
                 )
             except Exception as e:
                 if not self._should_retry(e, retry_count, max_retries):
@@ -216,17 +276,33 @@ class BillcomServiceAbstract(models.AbstractModel):
                 self._handle_retry_delay(retry_delay, retry_count, max_retries, str(e))
 
     def _get_retry_config(self, config):
-        """Get retry con                                                                                                                hjknmn, figuration from config"""
+        """Get retry configuration from config"""
         max_retries = getattr(config, "api_max_retries", 3)
         retry_delay = getattr(config, "api_retry_delay", 5)
         return max_retries, retry_delay
 
     def _execute_request(
-        self, endpoint, method, data, params, config, retry_count, max_retries, extra_headers=None
+        self,
+        endpoint,
+        method,
+        data,
+        params,
+        config,
+        retry_count,
+        max_retries,
+        extra_headers=None,
     ):
         """Execute a single API request attempt"""
-        # Get token for this attempt
-        token = self._get_token()
+        # Determine if this is a payment creation operation requiring MFA
+        is_payment_creation = method == "POST" and endpoint.rstrip("/") == "payments"
+
+        # Get appropriate token based on operation type
+        if is_payment_creation:
+            _logger.info("Payment creation detected - using MFA-trusted token")
+            token = self._get_mfa_token()
+        else:
+            # Regular operations use regular token (no MFA)
+            token = self._get_token()
 
         url = self._build_api_url(config, endpoint)
         headers = self._build_headers(token, config)
@@ -247,44 +323,61 @@ class BillcomServiceAbstract(models.AbstractModel):
 
             if isinstance(error_details, list):
                 for error in error_details:
-                    if isinstance(error, dict) and error.get('code') == 'BDC_1361':
-                        error_message = error.get('message', '')
+                    if isinstance(error, dict) and error.get("code") == "BDC_1361":
+                        error_message = error.get("message", "")
 
                         # BDC_1361 can mean two things:
                         # 1. "Untrusted session" = MFA required (cannot be fixed with token refresh)
                         # 2. "Session expired" = Token expired (can be fixed with token refresh)
 
-                        if 'untrusted' in error_message.lower():
-                            _logger.error("MFA-trusted session required (BDC_1361: Untrusted session). This endpoint requires MFA authentication.")
-                            _logger.error("Payment creation requires MFA setup. Please configure MFA for this Bill.com account.")
+                        if "untrusted" in error_message.lower():
+                            _logger.error(
+                                "MFA-trusted session required (BDC_1361: Untrusted session). This endpoint requires MFA authentication."
+                            )
+                            _logger.error(
+                                "Payment creation requires MFA setup. Please configure MFA for this Bill.com account."
+                            )
                             # Don't retry - this won't be fixed by token refresh
                             break
                         else:
-                            _logger.warning("Session expired (BDC_1361) - invalidating token and refreshing")
+                            _logger.warning(
+                                "Session expired (BDC_1361) - invalidating token and refreshing"
+                            )
                             try:
                                 # Invalidate the current token to force a new authentication
-                                config.sudo().write({
-                                    'token': False,
-                                    'token_expiry': False,
-                                })
+                                config.sudo().write(
+                                    {
+                                        "token": False,
+                                        "token_expiry": False,
+                                    }
+                                )
 
                                 # Use test_connection to get a fresh token
                                 config.test_connection()
-                                _logger.info("Token refreshed successfully, retrying request")
+                                _logger.info(
+                                    "Token refreshed successfully, retrying request"
+                                )
 
-                                # Retry with new token
-                                new_token = config.token
+                                # Retry with appropriate token type (MFA if payment, regular otherwise)
+                                if is_payment_creation:
+                                    new_token = self._get_mfa_token()
+                                else:
+                                    new_token = config.token
                                 headers = self._build_headers(new_token, config)
 
                                 # Add extra headers if provided
                                 if extra_headers:
                                     headers.update(extra_headers)
 
-                                response = self._send_http_request(method, url, headers, data, params)
+                                response = self._send_http_request(
+                                    method, url, headers, data, params
+                                )
                                 self._log_response(response)
 
                                 # Return the result of the retried request
-                                return self._process_response(response, retry_count, max_retries)
+                                return self._process_response(
+                                    response, retry_count, max_retries
+                                )
 
                             except Exception as e:
                                 _logger.error("Failed to refresh token: %s", str(e))
@@ -367,7 +460,7 @@ class BillcomServiceAbstract(models.AbstractModel):
                 "Bill.com API error %s for URL: %s\nError details: %s",
                 response.status_code,
                 response.url,
-                error_details
+                error_details,
             )
 
             # Raise with detailed error message
@@ -405,19 +498,19 @@ class BillcomServiceAbstract(models.AbstractModel):
                 for error in error_data:
                     if isinstance(error, dict):
                         error_info = {
-                            'timestamp': error.get('timestamp'),
-                            'code': error.get('code'),
-                            'severity': error.get('severity'),
-                            'category': error.get('category'),
-                            'message': error.get('message'),
-                            'params': error.get('params', {})
+                            "timestamp": error.get("timestamp"),
+                            "code": error.get("code"),
+                            "severity": error.get("severity"),
+                            "category": error.get("category"),
+                            "message": error.get("message"),
+                            "params": error.get("params", {}),
                         }
                         errors.append(error_info)
                 return errors
             elif isinstance(error_data, dict):
                 # Single error object or nested errors
-                if 'errors' in error_data:
-                    return error_data['errors']
+                if "errors" in error_data:
+                    return error_data["errors"]
                 return error_data
             else:
                 return error_data
@@ -459,7 +552,9 @@ class BillcomServiceAbstract(models.AbstractModel):
             return True
 
         # Retry on our custom retryable exceptions (429, 500, 502, 503, 504)
-        if hasattr(exception, "status_code") and self._is_retryable_status(exception.status_code):
+        if hasattr(exception, "status_code") and self._is_retryable_status(
+            exception.status_code
+        ):
             return True
 
         # Retry on JSON parsing errors
@@ -571,6 +666,39 @@ class BillcomServiceAbstract(models.AbstractModel):
             UserError: If step-up fails
         """
         try:
+            # Step 1: Check current MFA status
+            status_url = f"{config.api_url}/v3/login/session"
+            status_headers = {
+                "accept": "application/json",
+                "content-type": "application/json",
+                "sessionId": session_id,
+                "devKey": config.dev_key,
+            }
+
+            _logger.info("Checking MFA status at: %s", status_url)
+            status_response = requests.get(
+                status_url, headers=status_headers, timeout=30
+            )
+
+            if status_response.status_code != 200:
+                _logger.error("Failed to retrieve MFA status: %s", status_response.text)
+                raise UserError(
+                    _("Failed to check MFA status: %s") % status_response.text
+                )
+
+            status_result = status_response.json()
+            mfa_status = status_result.get("mfaStatus")
+            _logger.info("Current MFA status: %s", mfa_status)
+
+            # Step 2: If already MFA complete, no need for step-up
+            if mfa_status == "COMPLETE":
+                _logger.info(
+                    "✅ Session already has MFA COMPLETE status - no step-up needed"
+                )
+                return True
+
+            # Step 3: Perform MFA step-up
+            _logger.info("MFA status is '%s' - performing step-up", mfa_status)
             step_up_url = f"{config.api_url}/v3/mfa/step-up"
 
             headers = {
@@ -586,7 +714,13 @@ class BillcomServiceAbstract(models.AbstractModel):
             }
 
             _logger.info("Step-up URL: %s", step_up_url)
-            _logger.info("Step-up payload: %s", {"rememberMeId": config.mfa_remember_me_id[:20] + "...", "device": payload["device"]})
+            _logger.info(
+                "Step-up payload: %s",
+                {
+                    "rememberMeId": config.mfa_remember_me_id[:20] + "...",
+                    "device": payload["device"],
+                },
+            )
 
             response = requests.post(
                 step_up_url, json=payload, headers=headers, timeout=30
@@ -603,8 +737,21 @@ class BillcomServiceAbstract(models.AbstractModel):
                 _logger.info("✅ Session successfully marked as MFA-trusted via step-up")
                 return True
             else:
-                _logger.error("Step-up response did not indicate trusted status: %s", result)
-                raise UserError(_("Failed to mark session as MFA-trusted"))
+                _logger.error(
+                    "Step-up response did not indicate trusted status: %s", result
+                )
+                # Clear invalid rememberMeId
+                config.sudo().write({"mfa_remember_me_id": False})
+                _logger.warning(
+                    "RememberMeId appears to be expired or invalid - cleared from config"
+                )
+                raise UserError(
+                    _(
+                        "MFA Remember Me ID has expired or is invalid.\n\n"
+                        "Please use 'Setup MFA' button to obtain a new one.\n\n"
+                        "The Remember Me ID has been cleared from configuration."
+                    )
+                )
 
         except requests.exceptions.RequestException as e:
             _logger.error("MFA step-up request failed: %s", str(e))

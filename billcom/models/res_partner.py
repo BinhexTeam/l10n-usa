@@ -46,7 +46,8 @@ class ResPartner(models.Model):
         # Common data for both vendor and customer (only valid API v3 fields)
         common_data = {
             "name": self.name or "Unknown",  # Required field
-            "shortName": self.ref or (self.name[:40] if self.name else "Unknown")[:40],  # Max 40 chars
+            "shortName": self.ref
+            or (self.name[:40] if self.name else "Unknown")[:40],  # Max 40 chars
         }
 
         # Add optional fields only if they have values
@@ -67,7 +68,9 @@ class ResPartner(models.Model):
                 "line1": addr.street or "N/A",  # Required: line1 cannot be empty
                 "city": addr.city or "N/A",  # Required: city cannot be empty
                 "zipOrPostalCode": addr.zip or "00000",  # Required: cannot be empty
-                "country": addr.country_id.code if addr.country_id else "US",  # Required: default to US
+                "country": addr.country_id.code
+                if addr.country_id
+                else "US",  # Required: default to US
             }
 
             # Optional fields - only add if they have values
@@ -121,13 +124,12 @@ class ResPartner(models.Model):
             return customer_data
 
     def sync_to_billcom(self, partner_type="vendor"):
-        """Sync partner to Bill.com"""
+        """Sync partner to Bill.com - delegates to service"""
         self.ensure_one()
         if not self.is_sync_to_billcom:
             return False
 
         try:
-            # Use the service model to sync the partner
             service = self.env["billcom.service"]
             return service.sync_partner(self, partner_type)
         except Exception as e:
@@ -135,304 +137,32 @@ class ResPartner(models.Model):
             raise UserError(_("Error syncing to Bill.com: %s") % str(e))
 
     def sync_to_billcom_vendor(self):
+        """Sync as vendor - delegates to service"""
         return self.sync_to_billcom(partner_type="vendor")
 
     def sync_to_billcom_customer(self):
+        """Sync as customer - delegates to service"""
         return self.sync_to_billcom(partner_type="customer")
 
     @api.model
     def sync_from_billcom(self, partner_type="vendor"):
-        """Sync partners from Bill.com to Odoo"""
-        try:
-            config = self.env["billcom.config"].get_config()
-        except UserError as e:
-            _logger.warning(str(e))
-            return False
-
-        if partner_type == "vendor" and not config.sync_vendors:
-            _logger.info("Vendor synchronization is disabled")
-            return False
-        elif partner_type == "customer" and not config.sync_customers:
-            _logger.info("Customer synchronization is disabled")
-            return False
-
-        endpoint = "vendors" if partner_type == "vendor" else "customers"
-        try:
-            result = self.env["billcom.service"]._make_request(endpoint, method="GET")
-            partners = result.get("data", [])
-            synced_count = 0
-
-            for partner_data in partners:
-                existing_partner = self.search(
-                    [("billcom", "=", partner_data["id"])], limit=1
-                )
-
-                address = partner_data.get("address", {})
-                partner_vals = {
-                    "name": partner_data["name"],
-                    "email": partner_data.get("email", ""),
-                    "phone": partner_data.get("phone", ""),
-                    "street": address.get("line1", ""),  # Updated field name for v16
-                    "street2": address.get("line2", ""),  # Updated field name for v16
-                    "city": address.get("city", ""),
-                    "zip": address.get(
-                        "zipOrPostalCode", ""
-                    ),  # Updated field name for v16
-                    "billcom": partner_data["id"],
-                    "last_sync_date": fields.Datetime.now(),
-                    "ref": partner_data.get("shortName", ""),
-                    "lang": partner_data.get("language", "en_US"),
-                    "is_sync_to_billcom": True,
-                }
-
-                if partner_type == "vendor":
-                    partner_vals["supplier_rank"] = 1
-                    partner_vals["customer_rank"] = 0
-                else:
-                    partner_vals["supplier_rank"] = 0
-                    partner_vals["customer_rank"] = 1
-
-                if address.get("stateOrProvince"):  # Updated field name for v16
-                    state = self.env["res.country.state"].search(
-                        [("code", "=", address["stateOrProvince"])], limit=1
-                    )
-                    if state:
-                        partner_vals["state_id"] = state.id
-
-                if address.get("country"):
-                    country = self.env["res.country"].search(
-                        [("code", "=", address["country"])], limit=1
-                    )
-                    if country:
-                        partner_vals["country_id"] = country.id
-
-                if existing_partner:
-                    existing_partner.write(partner_vals)
-                    _logger.info(
-                        "Updated %s: %s from Bill.com",
-                        partner_type,
-                        partner_data["name"],
-                    )
-                    partner_to_use = existing_partner
-                else:
-                    partner_to_use = self.create(partner_vals)
-                    _logger.info(
-                        "Created %s: %s from Bill.com",
-                        partner_type,
-                        partner_data["name"],
-                    )
-                synced_count += 1
-
-                # If this is a vendor, try to sync bank account information
-                if partner_type == "vendor" and partner_to_use.billcom:
-                    try:
-                        # Get bank account information from Bill.com
-                        bank_result = self.env["billcom.service"]._make_request(
-                            f"vendors/{partner_to_use.billcom}/bank-account",
-                            method="GET",
-                        )
-
-                        if bank_result and bank_result.get("bankAccount"):
-                            bank_info = bank_result.get("bankAccount", {})
-
-                            # Check if we already have this bank account
-                            existing_bank = False
-                            if partner_to_use.bank_ids:
-                                for bank in partner_to_use.bank_ids:
-                                    if bank.acc_number == bank_info.get(
-                                        "accountNumber"
-                                    ):
-                                        existing_bank = True
-                                        break
-
-                            # Create bank account if it doesn't exist
-                            if not existing_bank:
-                                bank_vals = {
-                                    "acc_number": bank_info.get("accountNumber", ""),
-                                    "aba_routing": bank_info.get("routingNumber", ""),
-                                    "acc_holder_name": bank_info.get(
-                                        "nameOnAccount", partner_to_use.name
-                                    ),
-                                    "partner_id": partner_to_use.id,
-                                }
-
-                                # Try to find the bank based on routing number
-                                if bank_info.get("routingNumber"):
-                                    bank_id = self.env["res.bank"].search(
-                                        [
-                                            (
-                                                "aba_routing",
-                                                "=",
-                                                bank_info.get("routingNumber"),
-                                            )
-                                        ],
-                                        limit=1,
-                                    )
-                                    if bank_id:
-                                        bank_vals["bank_id"] = bank_id.id
-
-                                # Create the bank account
-                                self.env["res.partner.bank"].create(bank_vals)
-                                _logger.info(
-                                    "Created bank account for vendor %s from Bill.com",
-                                    partner_to_use.name,
-                                )
-                    except Exception as e:
-                        # If error is 404, it means bank account doesn't exist, which is fine
-                        if "404" not in str(e):
-                            _logger.warning(
-                                "Error syncing bank account for vendor %s: %s",
-                                partner_to_use.name,
-                                str(e),
-                            )
-
-            _logger.info("Synced %d %ss from Bill.com", synced_count, partner_type)
-            return synced_count
-        except Exception as e:
-            _logger.error("Error syncing %ss from Bill.com: %s", partner_type, str(e))
-            raise UserError(f"Error syncing {partner_type}s from Bill.com: {str(e)}")
+        """Sync partners from Bill.com to Odoo - delegates to service"""
+        service = self.env["billcom.service"]
+        return service.sync_partners_from_billcom(partner_type=partner_type)
 
     @api.model
     def _sync_partners_cron(self):
-        """Cron job to sync partners from Bill.com"""
-        try:
-            # Get config and check if auto sync is enabled
-            try:
-                config = self.env["billcom.config"].get_config()
-                if not config.auto_sync_enabled:
-                    _logger.info("Automatic sync is disabled in configuration")
-                    return False
-            except UserError as e:
-                _logger.warning(str(e))
-                return False
-
-            # Sync vendors if enabled
-            if config.sync_vendors:
-                try:
-                    vendor_count = self.sync_from_billcom(partner_type="vendor")
-                    _logger.info(
-                        "Cron job synced %s vendors from Bill.com", vendor_count or 0
-                    )
-                except Exception as e:
-                    _logger.error("Error in vendor sync cron: %s", str(e))
-
-            # Sync customers if enabled
-            if config.sync_customers:
-                try:
-                    customer_count = self.sync_from_billcom(partner_type="customer")
-                    _logger.info(
-                        "Cron job synced %s customers from Bill.com",
-                        customer_count or 0,
-                    )
-                except Exception as e:
-                    _logger.error("Error in customer sync cron: %s", str(e))
-
-            return True
-        except Exception as e:
-            _logger.error("Error in partner sync cron: %s", str(e))
-            return False
+        """Cron job to sync partners from Bill.com - delegates to service"""
+        service = self.env["billcom.service"]
+        return service.sync_partners_cron()
 
     @api.model
     def sync_from_billcom_by_id(self, billcom_id, partner_type="vendor"):
-        """Sync a specific partner from Bill.com by ID"""
-        try:
-            config = self.env["billcom.config"].get_config()
-        except UserError as e:
-            _logger.warning(str(e))
-            return False
-
-        if partner_type == "vendor" and not config.sync_vendors:
-            _logger.info("Vendor synchronization is disabled")
-            return False
-        elif partner_type == "customer" and not config.sync_customers:
-            _logger.info("Customer synchronization is disabled")
-            return False
-
-        endpoint = (
-            f"{'vendors' if partner_type == 'vendor' else 'customers'}/{billcom_id}"
+        """Sync a specific partner from Bill.com by ID - delegates to service"""
+        service = self.env["billcom.service"]
+        return service.sync_partner_from_billcom_by_id(
+            billcom_id, partner_type=partner_type
         )
-
-        try:
-            partner_data = self.env["billcom.service"]._make_request(
-                endpoint, method="GET"
-            )
-
-            if not partner_data or partner_data.get("status") == "error":
-                _logger.warning("Partner not found in Bill.com with ID: %s", billcom_id)
-                return False
-
-            # Find existing partner or create new one
-            existing_partner = self.search([("billcom_id", "=", billcom_id)], limit=1)
-            if not existing_partner:
-                existing_partner = self.search([("billcom", "=", billcom_id)], limit=1)
-
-            address = partner_data.get("address", {})
-            partner_vals = {
-                "name": partner_data.get("name", "Unknown"),
-                "email": partner_data.get("email", ""),
-                "phone": partner_data.get("phone", ""),
-                "street": address.get("line1", ""),
-                "street2": address.get("line2", ""),
-                "city": address.get("city", ""),
-                "zip": address.get("zipOrPostalCode", ""),
-                "billcom_id": billcom_id,
-                "billcom": billcom_id,  # Backwards compatibility
-                "last_sync_date": fields.Datetime.now(),
-                "ref": partner_data.get("shortName", ""),
-                "is_sync_to_billcom": True,
-                "billcom_sync_state": "synced",
-            }
-
-            # Set partner type
-            if partner_type == "vendor":
-                partner_vals["supplier_rank"] = 1
-                partner_vals["customer_rank"] = 0
-            else:
-                partner_vals["supplier_rank"] = 0
-                partner_vals["customer_rank"] = 1
-
-            # Set state/country
-            if address.get("stateOrProvince"):
-                state = self.env["res.country.state"].search(
-                    [("code", "=", address["stateOrProvince"])], limit=1
-                )
-                if state:
-                    partner_vals["state_id"] = state.id
-
-            if address.get("country"):
-                country = self.env["res.country"].search(
-                    [("code", "=", address["country"])], limit=1
-                )
-                if country:
-                    partner_vals["country_id"] = country.id
-
-            if existing_partner:
-                existing_partner.write(partner_vals)
-                _logger.info(
-                    "Updated %s: %s from Bill.com",
-                    partner_type,
-                    partner_data.get("name"),
-                )
-                return existing_partner
-            else:
-                new_partner = self.create(partner_vals)
-                _logger.info(
-                    "Created %s: %s from Bill.com",
-                    partner_type,
-                    partner_data.get("name"),
-                )
-                return new_partner
-
-        except Exception as e:
-            _logger.error(
-                "Error syncing %s %s from Bill.com: %s",
-                partner_type,
-                billcom_id,
-                str(e),
-            )
-            if existing_partner:
-                existing_partner.billcom_sync_state = "error"
-            return False
 
     # Backwards compatibility
     _sync_vendors_cron = _sync_partners_cron
