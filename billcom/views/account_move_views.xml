@@ -34,6 +34,20 @@
                                 readonly="1"
                                 attrs="{'invisible': [('last_sync_date', '=', False)]}"
                             />
+                            <field
+                                name="billcom_sync_status"
+                                readonly="1"
+                                widget="badge"
+                                decoration-success="billcom_sync_status == 'synced'"
+                                decoration-danger="billcom_sync_status == 'sync_failed'"
+                                decoration-info="billcom_sync_status == 'not_synced'"
+                            />
+                            <field
+                                name="billcom_sync_error"
+                                readonly="1"
+                                attrs="{'invisible': [('billcom_sync_error', '=', False)]}"
+                                widget="text"
+                            />
                         </group>
                     </group>
                     <group attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}">
@@ -48,21 +62,57 @@
                             />
                         </group>
                     </group>
-                    <separator string="Bill.com Documents" attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}" />
+                    <separator
+                        string="Bill.com Documents"
+                        attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}"
+                    />
                     <field
                         name="billcom_document_ids"
                         attrs="{'invisible': [('move_type', '!=', 'in_invoice')]}"
                         context="{'default_bill_id': active_id}"
                     >
-                        <tree editable="bottom" decoration-success="upload_status == 'uploaded'" decoration-danger="upload_status == 'failed'" decoration-warning="upload_status == 'in_progress'">
+                        <tree
+                            editable="bottom"
+                            decoration-success="upload_status == 'uploaded'"
+                            decoration-danger="upload_status == 'failed'"
+                            decoration-warning="upload_status == 'in_progress'"
+                        >
                             <field name="name" />
                             <field name="file_data" filename="name" widget="binary" />
                             <field name="file_size" widget="integer" readonly="1" />
                             <field name="billcom_id" optional="show" readonly="1" />
-                            <field name="upload_status" widget="badge" decoration-success="upload_status == 'uploaded'" decoration-danger="upload_status == 'failed'" decoration-warning="upload_status == 'in_progress'" decoration-muted="upload_status == 'pending'" />
-                            <button name="button_upload_to_billcom" type="object" string="Upload" class="btn-primary" attrs="{'invisible': [('upload_status', 'in', ['uploaded', 'in_progress'])]}" icon="fa-upload" />
-                            <button name="button_check_upload_status" type="object" string="Check Status" class="btn-secondary" attrs="{'invisible': [('upload_status', '!=', 'in_progress')]}" icon="fa-refresh" />
-                            <button name="button_download_from_billcom" type="object" string="Download" class="btn-secondary" attrs="{'invisible': [('upload_status', '!=', 'uploaded')]}" icon="fa-download" />
+                            <field
+                                name="upload_status"
+                                widget="badge"
+                                decoration-success="upload_status == 'uploaded'"
+                                decoration-danger="upload_status == 'failed'"
+                                decoration-warning="upload_status == 'in_progress'"
+                                decoration-muted="upload_status == 'pending'"
+                            />
+                            <button
+                                name="button_upload_to_billcom"
+                                type="object"
+                                string="Upload"
+                                class="btn-primary"
+                                attrs="{'invisible': [('upload_status', 'in', ['uploaded', 'in_progress'])]}"
+                                icon="fa-upload"
+                            />
+                            <button
+                                name="button_check_upload_status"
+                                type="object"
+                                string="Check Status"
+                                class="btn-secondary"
+                                attrs="{'invisible': [('upload_status', '!=', 'in_progress')]}"
+                                icon="fa-refresh"
+                            />
+                            <button
+                                name="button_download_from_billcom"
+                                type="object"
+                                string="Download"
+                                class="btn-secondary"
+                                attrs="{'invisible': [('upload_status', '!=', 'uploaded')]}"
+                                icon="fa-download"
+                            />
                         </tree>
                     </field>
                 </page>
@@ -115,6 +165,17 @@
                     string="Bill.com Linked"
                     name="billcom_linked"
                     domain="[('billcom', '!=', False)]"
+                />
+                <separator />
+                <filter
+                    string="Sync Failed"
+                    name="sync_failed"
+                    domain="[('billcom_sync_status', '=', 'sync_failed')]"
+                />
+                <filter
+                    string="Synced to Bill.com"
+                    name="synced"
+                    domain="[('billcom_sync_status', '=', 'synced')]"
                 />
             </filter>
             <group position="inside">

@@ -37,6 +37,20 @@
                                 readonly="1"
                                 attrs="{'invisible': [('last_sync_date', '=', False)]}"
                             />
+                            <field
+                                name="billcom_sync_status"
+                                readonly="1"
+                                widget="badge"
+                                decoration-success="billcom_sync_status == 'synced'"
+                                decoration-danger="billcom_sync_status == 'sync_failed'"
+                                decoration-info="billcom_sync_status == 'not_synced'"
+                            />
+                            <field
+                                name="billcom_sync_error"
+                                readonly="1"
+                                attrs="{'invisible': [('billcom_sync_error', '=', False)]}"
+                                widget="text"
+                            />
                             <button
                                 name="sync_to_billcom_vendor"
                                 string="Sync as Vendor"
@@ -61,6 +75,20 @@
                                 name="last_sync_date"
                                 readonly="1"
                                 attrs="{'invisible': [('last_sync_date', '=', False)]}"
+                            />
+                            <field
+                                name="billcom_sync_status"
+                                readonly="1"
+                                widget="badge"
+                                decoration-success="billcom_sync_status == 'synced'"
+                                decoration-danger="billcom_sync_status == 'sync_failed'"
+                                decoration-info="billcom_sync_status == 'not_synced'"
+                            />
+                            <field
+                                name="billcom_sync_error"
+                                readonly="1"
+                                attrs="{'invisible': [('billcom_sync_error', '=', False)]}"
+                                widget="text"
                             />
                             <button
                                 name="sync_to_billcom_customer"
@@ -96,6 +124,17 @@
                     string="Bill.com Linked"
                     name="billcom_linked"
                     domain="[('billcom', '!=', False)]"
+                />
+                <separator />
+                <filter
+                    string="Sync Failed"
+                    name="sync_failed"
+                    domain="[('billcom_sync_status', '=', 'sync_failed')]"
+                />
+                <filter
+                    string="Synced to Bill.com"
+                    name="synced"
+                    domain="[('billcom_sync_status', '=', 'synced')]"
                 />
             </filter>
             <group position="inside">

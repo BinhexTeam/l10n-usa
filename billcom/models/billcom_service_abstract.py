@@ -240,11 +240,9 @@ class BillcomServiceAbstract(models.AbstractModel):
     def _get_mfa_token(self):
         """Get MFA-trusted token for payment operations
 
-        This method ensures the session has MFA trust by:
-        1. Getting regular token (or using cached one)
-        2. Checking if rememberMeId is configured
-        3. Checking MFA status via GET /v3/login/session
-        4. Performing step-up if needed
+        This method obtains an MFA-trusted session by logging in with rememberMeId.
+        According to Bill.com docs, when you sign in with POST /v3/login including
+        rememberMeId and device, you get an MFA-trusted session directly.
 
         ONLY call this for operations requiring MFA (e.g., POST /v3/payments)
 
@@ -252,14 +250,11 @@ class BillcomServiceAbstract(models.AbstractModel):
             str: MFA-trusted session ID
 
         Raises:
-            UserError: If MFA configuration is missing or step-up fails
+            UserError: If MFA configuration is missing
         """
         config = self._get_config()
 
-        # Get regular token first (will use cached if valid)
-        token = self._get_token()
-
-        # Check if we have rememberMeId for step-up
+        # Check if we have rememberMeId configured
         if not config.mfa_remember_me_id:
             _logger.error(
                 "Bill.com MFA Configuration Required\n"
@@ -277,16 +272,69 @@ class BillcomServiceAbstract(models.AbstractModel):
                 )
             )
 
-        # Perform MFA step-up (will check status first and skip if already COMPLETE)
-        _logger.info("Payment operation requested - ensuring MFA-trusted session")
-        self._mfa_step_up(config, token)
+        # Perform MFA-trusted login with rememberMeId
+        _logger.info("Payment operation requested - performing MFA-trusted login")
 
-        _logger.info("✅ MFA-trusted token ready for payment operation")
-        return token
+        try:
+            auth_url = f"{config.api_url}/v3/login"
+
+            # Login with rememberMeId and device for MFA-trusted session
+            payload = {
+                "organizationId": config.organization_id,
+                "devKey": config.dev_key,
+                "username": config.username,
+                "password": config.password,
+                "rememberMeId": config.mfa_remember_me_id,
+                "device": config.mfa_device_name or "Odoo Integration",
+            }
+
+            headers = {"accept": "application/json", "content-type": "application/json"}
+
+            _logger.info("Authenticating with Remember Me ID for MFA-trusted session")
+
+            response = requests.post(
+                auth_url, json=payload, headers=headers, timeout=40
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            session_id = result.get("sessionId")
+
+            if not session_id:
+                raise UserError(_("No session ID received from MFA login"))
+
+            _logger.info("✅ MFA-trusted session obtained successfully")
+            return session_id
+
+        except requests.exceptions.RequestException as e:
+            _logger.error("MFA-trusted login failed: %s", str(e))
+
+            # Check if Remember Me ID expired
+            error_msg = str(e).lower()
+            if "remember" in error_msg and (
+                "expired" in error_msg or "invalid" in error_msg
+            ):
+                config.sudo().write({"mfa_remember_me_id": False})
+                _logger.warning("RememberMeId confirmed expired - cleared from config")
+                raise UserError(
+                    _(
+                        "MFA Remember Me ID has expired or is invalid.\n\n"
+                        "Please use 'Setup MFA' button to obtain a new one.\n\n"
+                        "Remember Me ID is valid for 30 days."
+                    )
+                )
+            else:
+                raise UserError(_("MFA-trusted login failed: %s") % str(e))
 
     @api.model
     def _make_request(
-        self, endpoint, method="GET", data=None, params=None, extra_headers=None, is_file_upload=False
+        self,
+        endpoint,
+        method="GET",
+        data=None,
+        params=None,
+        extra_headers=None,
+        is_file_upload=False,
     ):
         """Make a request to Bill.com API v3 with retry logic
 
@@ -723,14 +771,13 @@ class BillcomServiceAbstract(models.AbstractModel):
         if retry_count >= max_retries:
             return False
 
-        # Don't retry on client errors (400, 404, 422) - these are validation/data errors
+        # Don't retry on any 4xx client errors - these are validation/data errors
         # that won't be fixed by retrying
         if hasattr(exception, "response") and exception.response is not None:
             status_code = exception.response.status_code
-            # 400 = Bad Request (validation errors)
-            # 404 = Not Found (resource doesn't exist)
-            # 422 = Unprocessable Entity (business logic validation errors, e.g., duplicate records)
-            if status_code in (400, 404, 422):
+            # All 4xx status codes are client errors (bad request, unauthorized, forbidden, not found, etc.)
+            # Retrying won't fix these - they require correcting the request
+            if 400 <= status_code < 500:
                 _logger.info(
                     "Not retrying request - HTTP %s is a client error that won't be fixed by retrying",
                     status_code,
@@ -930,40 +977,97 @@ class BillcomServiceAbstract(models.AbstractModel):
 
             result = response.json()
 
-            if result.get("trusted"):
-                _logger.info("✅ Session successfully marked as MFA-trusted via step-up")
-                return True
+            # Step 4: Verify MFA status after step-up
+            # Instead of trusting only the "trusted" field, check actual MFA status
+            _logger.info("Verifying MFA status after step-up...")
+            verify_response = requests.get(
+                status_url, headers=status_headers, timeout=30
+            )
+
+            if verify_response.status_code == 200:
+                verify_result = verify_response.json()
+                new_mfa_status = verify_result.get("mfaStatus")
+                _logger.info("MFA status after step-up: %s", new_mfa_status)
+
+                if new_mfa_status == "COMPLETE":
+                    _logger.info(
+                        "✅ Session successfully marked as MFA-trusted via step-up"
+                    )
+                    return True
+                else:
+                    _logger.warning(
+                        "Step-up completed but MFA status is still '%s' (expected 'COMPLETE')",
+                        new_mfa_status,
+                    )
+                    # Don't clear Remember Me ID yet, might be a timing issue
+                    raise UserError(
+                        _(
+                            "MFA step-up completed but session is not yet trusted.\n\n"
+                            "Status: %s\n\n"
+                            "Please try again in a moment.\n\n"
+                            "If the problem persists, use 'Setup MFA' button to reconfigure."
+                        )
+                        % new_mfa_status
+                    )
             else:
-                _logger.error(
-                    "Step-up response did not indicate trusted status: %s", result
-                )
-                # Clear invalid rememberMeId
+                # Verification failed but step-up succeeded
+                # Accept the step-up result
+                if result.get("trusted"):
+                    _logger.info(
+                        "✅ Step-up response indicates trusted (verification failed but accepting)"
+                    )
+                    return True
+                else:
+                    _logger.error(
+                        "Step-up response did not indicate trusted status: %s", result
+                    )
+                    # Only clear Remember Me ID if we're sure it's invalid
+                    # Don't clear on first failure - might be temporary issue
+                    raise UserError(
+                        _(
+                            "MFA step-up did not establish trusted session.\n\n"
+                            "Response: %s\n\n"
+                            "Please try again. If the problem persists, use 'Setup MFA' button."
+                        )
+                        % result
+                    )
+
+        except requests.exceptions.RequestException as e:
+            _logger.error("MFA step-up request failed: %s", str(e))
+
+            # Check if it's definitely an expired/invalid Remember Me ID
+            error_msg = str(e).lower()
+
+            # Only clear Remember Me ID if error explicitly mentions it's expired/invalid
+            if "remember" in error_msg and (
+                "expired" in error_msg or "invalid" in error_msg
+            ):
                 config.sudo().write({"mfa_remember_me_id": False})
                 _logger.warning(
-                    "RememberMeId appears to be expired or invalid - cleared from config"
+                    "RememberMeId confirmed expired or invalid - cleared from config"
                 )
                 raise UserError(
                     _(
                         "MFA Remember Me ID has expired or is invalid.\n\n"
                         "Please use 'Setup MFA' button to obtain a new one.\n\n"
-                        "The Remember Me ID has been cleared from configuration."
-                    )
-                )
-
-        except requests.exceptions.RequestException as e:
-            _logger.error("MFA step-up request failed: %s", str(e))
-
-            # If rememberMeId expired, clear it and raise informative error
-            error_msg = str(e).lower()
-            if "expired" in error_msg or "invalid" in error_msg:
-                config.sudo().write({"mfa_remember_me_id": False})
-                _logger.warning("RememberMeId expired or invalid - cleared from config")
-                raise UserError(
-                    _(
-                        "MFA Remember Me ID has expired.\n\n"
-                        "Please use 'Setup MFA' button to obtain a new one.\n"
                         "Remember Me ID is valid for 30 days."
                     )
+                )
+            else:
+                # Other network/API error - don't clear Remember Me ID
+                _logger.warning(
+                    "MFA step-up failed but Remember Me ID kept (may be temporary issue)"
+                )
+                raise UserError(
+                    _(
+                        "MFA step-up request failed.\n\n"
+                        "Error: %s\n\n"
+                        "Please try again. If the problem persists, check:\n"
+                        "1. Network connectivity\n"
+                        "2. Bill.com API status\n"
+                        "3. Use 'Setup MFA' button to reconfigure if needed"
+                    )
+                    % str(e)
                 )
 
     def _execute_request_with_upload(
@@ -1004,7 +1108,9 @@ class BillcomServiceAbstract(models.AbstractModel):
 
         # Send request with file upload support
         if is_file_upload:
-            response = self._send_file_upload_request(method, url, headers, data, params)
+            response = self._send_file_upload_request(
+                method, url, headers, data, params
+            )
         else:
             response = self._send_http_request(method, url, headers, data, params)
 
@@ -1049,7 +1155,9 @@ class BillcomServiceAbstract(models.AbstractModel):
                                     }
                                 )
                                 config.test_connection()
-                                _logger.info("Token refreshed successfully, retrying request")
+                                _logger.info(
+                                    "Token refreshed successfully, retrying request"
+                                )
 
                                 if is_payment_creation:
                                     new_token = self._get_mfa_token()
@@ -1137,8 +1245,7 @@ class BillcomServiceAbstract(models.AbstractModel):
             }
 
             status_description = http_status_map.get(
-                e.response.status_code,
-                f"HTTP {e.response.status_code}"
+                e.response.status_code, f"HTTP {e.response.status_code}"
             )
 
             _logger.error(

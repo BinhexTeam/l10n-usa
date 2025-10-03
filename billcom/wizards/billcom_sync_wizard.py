@@ -170,10 +170,10 @@ class BillcomSyncWizard(models.TransientModel):
             try:
                 items = self._create_sync_items(sync_type)
                 queue_items.extend(items)
-                sync_stats[sync_type] = {'items': len(items), 'error': None}
+                sync_stats[sync_type] = {"items": len(items), "error": None}
             except Exception as e:
                 _logger.error(f"Error creating sync items for {sync_type}: {e}")
-                sync_stats[sync_type] = {'items': 0, 'error': str(e)}
+                sync_stats[sync_type] = {"items": 0, "error": str(e)}
 
         total_items = len(queue_items)
 
@@ -186,7 +186,9 @@ class BillcomSyncWizard(models.TransientModel):
             processed_results = self._process_sync_items(queue_items)
 
         # Generate HTML summary with improved UI
-        self.result_summary = self._generate_html_summary(sync_stats, total_items, processed_results)
+        self.result_summary = self._generate_html_summary(
+            sync_stats, total_items, processed_results
+        )
 
         # Return action to show results
         return {
@@ -204,32 +206,32 @@ class BillcomSyncWizard(models.TransientModel):
 
         # Icon mapping for sync types
         type_icons = {
-            'vendor': '👥',
-            'customer': '🛒',
-            'bill': '📄',
-            'invoice': '📑',
-            'payment': '💰',
-            'document': '📎'
+            "vendor": "👥",
+            "customer": "🛒",
+            "bill": "📄",
+            "invoice": "📑",
+            "payment": "💰",
+            "document": "📎",
         }
 
         # Color mapping for sync types
         type_colors = {
-            'vendor': '#875A7B',
-            'customer': '#00A09D',
-            'bill': '#F06050',
-            'invoice': '#00A09D',
-            'payment': '#17A2B8',
-            'document': '#6C757D'
+            "vendor": "#875A7B",
+            "customer": "#00A09D",
+            "bill": "#F06050",
+            "invoice": "#00A09D",
+            "payment": "#17A2B8",
+            "document": "#6C757D",
         }
 
-        html = '''
+        html = """
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto;">
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 25px; border-radius: 10px 10px 0 0; color: white;">
                 <h2 style="margin: 0; font-size: 24px; font-weight: 600;">
                     <span style="font-size: 28px;">📊</span> Synchronization Results
                 </h2>
             </div>
-        '''
+        """
 
         # Sync items summary
         html += '<div style="background: white; padding: 20px; border-left: 3px solid #e0e0e0; border-right: 3px solid #e0e0e0;">'
@@ -237,37 +239,37 @@ class BillcomSyncWizard(models.TransientModel):
         html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">'
 
         for sync_type, stats in sync_stats.items():
-            icon = type_icons.get(sync_type, '📦')
-            color = type_colors.get(sync_type, '#6C757D')
+            icon = type_icons.get(sync_type, "📦")
+            color = type_colors.get(sync_type, "#6C757D")
 
-            if stats['error']:
+            if stats["error"]:
                 # Error card
-                html += f'''
+                html += f"""
                 <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                     <div style="font-size: 24px; margin-bottom: 5px;">{icon}</div>
                     <div style="font-weight: 600; color: #333; text-transform: capitalize;">{sync_type}</div>
                     <div style="color: #856404; font-size: 12px; margin-top: 5px;">⚠️ Error</div>
                     <div style="font-size: 11px; color: #666; margin-top: 5px; word-break: break-word;">{stats['error'][:50]}...</div>
                 </div>
-                '''
+                """
             else:
                 # Success card
-                html += f'''
+                html += f"""
                 <div style="background: white; border-left: 4px solid {color}; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                     <div style="font-size: 24px; margin-bottom: 5px;">{icon}</div>
                     <div style="font-weight: 600; color: #333; text-transform: capitalize;">{sync_type}</div>
                     <div style="font-size: 28px; font-weight: bold; color: {color}; margin-top: 5px;">{stats['items']}</div>
                     <div style="font-size: 12px; color: #999;">items</div>
                 </div>
-                '''
+                """
 
-        html += '</div></div>'
+        html += "</div></div>"
 
         # Processing results (if processed immediately)
         if processed_results:
-            success_count = processed_results['processed']
-            error_count = processed_results['errors']
-            total = processed_results['total']
+            success_count = processed_results["processed"]
+            error_count = processed_results["errors"]
+            total = processed_results["total"]
             success_rate = (success_count / total * 100) if total > 0 else 0
 
             html += '<div style="background: white; padding: 20px; border-left: 3px solid #e0e0e0; border-right: 3px solid #e0e0e0; border-top: 1px solid #f0f0f0;">'
@@ -277,33 +279,33 @@ class BillcomSyncWizard(models.TransientModel):
             html += '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px;">'
 
             # Success card
-            html += f'''
+            html += f"""
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 8px; color: white; text-align: center;">
                 <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">Total Items</div>
                 <div style="font-size: 36px; font-weight: bold;">{total}</div>
             </div>
-            '''
+            """
 
             # Success count card
-            html += f'''
+            html += f"""
             <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); padding: 20px; border-radius: 8px; color: white; text-align: center;">
                 <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">✓ Successful</div>
                 <div style="font-size: 36px; font-weight: bold;">{success_count}</div>
             </div>
-            '''
+            """
 
             # Error count card
-            html += f'''
+            html += f"""
             <div style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 8px; color: white; text-align: center;">
                 <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">✗ Errors</div>
                 <div style="font-size: 36px; font-weight: bold;">{error_count}</div>
             </div>
-            '''
+            """
 
-            html += '</div>'
+            html += "</div>"
 
             # Progress bar
-            html += f'''
+            html += f"""
             <div style="margin-top: 20px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                     <span style="font-weight: 600; color: #333;">Success Rate</span>
@@ -313,12 +315,12 @@ class BillcomSyncWizard(models.TransientModel):
                     <div style="background: linear-gradient(90deg, #11998e 0%, #38ef7d 100%); height: 100%; width: {success_rate}%; transition: width 0.3s ease;"></div>
                 </div>
             </div>
-            '''
+            """
 
-            html += '</div>'
+            html += "</div>"
         else:
             # Queued message
-            html += f'''
+            html += f"""
             <div style="background: white; padding: 20px; border-left: 3px solid #e0e0e0; border-right: 3px solid #e0e0e0; border-top: 1px solid #f0f0f0;">
                 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 8px; color: white; text-align: center;">
                     <div style="font-size: 48px; margin-bottom: 10px;">⏳</div>
@@ -327,15 +329,15 @@ class BillcomSyncWizard(models.TransientModel):
                     <div style="font-size: 14px; opacity: 0.9;">Items will be processed by the scheduled action</div>
                 </div>
             </div>
-            '''
+            """
 
         # Footer
-        html += '''
+        html += """
             <div style="background: #f8f9fa; padding: 15px 20px; border-radius: 0 0 10px 10px; border: 3px solid #e0e0e0; border-top: none; text-align: center; color: #6c757d; font-size: 12px;">
                 <span style="font-size: 14px;">💡</span> Use the buttons below to view the sync queue or logs for more details
             </div>
         </div>
-        '''
+        """
 
         return html
 
@@ -419,37 +421,39 @@ class BillcomSyncWizard(models.TransientModel):
         params = {}
 
         # Only active vendors
-        params['archived'] = 'false'
+        params["archived"] = "false"
 
         # Add date filters (always use if available for better API performance)
         if self.date_from:
-            params['updatedDateStart'] = self.date_from.isoformat()
+            params["updatedDateStart"] = self.date_from.isoformat()
         if self.date_to:
-            params['updatedDateEnd'] = self.date_to.isoformat()
+            params["updatedDateEnd"] = self.date_to.isoformat()
 
         endpoint = "vendors"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
 
         # Call BILL API with params dictionary
-        response = service._make_request(endpoint, method='GET', params=params)
+        response = service._make_request(endpoint, method="GET", params=params)
 
         # BILL API v3 returns data in 'results' array
-        vendors_data = response.get('results', [])
+        vendors_data = response.get("results", [])
 
-        if not vendors_data and response.get('status') == 'error':
-            raise UserError(_(f"BILL API error: {response.get('errorMessage', 'Unknown error')}"))
+        if not vendors_data and response.get("status") == "error":
+            raise UserError(
+                _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
+            )
 
         _logger.info(f"Fetched {len(vendors_data)} vendors from BILL")
 
         # Create queue items for each vendor from BILL
         for vendor_data in vendors_data:
-            billcom_vendor_id = vendor_data.get('id')
+            billcom_vendor_id = vendor_data.get("id")
 
             # Check if vendor already exists in Odoo
-            partner = self.env['res.partner'].search([
-                ('billcom_id', '=', billcom_vendor_id)
-            ], limit=1)
+            partner = self.env["res.partner"].search(
+                [("billcom_id", "=", billcom_vendor_id)], limit=1
+            )
 
             # Apply partner filter if specified
             if self.filter_by_partner and self.partner_ids:
@@ -457,17 +461,19 @@ class BillcomSyncWizard(models.TransientModel):
                     continue
 
             # Create queue item with BILL data
-            queue_item = self.env["billcom.sync.queue"].create({
-                'sync_type': 'vendor',
-                'record_model': 'res.partner',
-                'record_id': partner.id if partner else None,
-                'direction': self.sync_direction,
-                'operation': 'update' if partner else 'create',
-                'priority': self.priority,
-                'state': 'queued',
-                'billcom_id': billcom_vendor_id,
-                'sync_data': str(vendor_data),  # Store BILL data for processing
-            })
+            queue_item = self.env["billcom.sync.queue"].create(
+                {
+                    "sync_type": "vendor",
+                    "record_model": "res.partner",
+                    "record_id": partner.id if partner else None,
+                    "direction": self.sync_direction,
+                    "operation": "update" if partner else "create",
+                    "priority": self.priority,
+                    "state": "queued",
+                    "billcom_id": billcom_vendor_id,
+                    "sync_data": str(vendor_data),  # Store BILL data for processing
+                }
+            )
             queue_items.append(queue_item)
 
         return queue_items
@@ -481,51 +487,55 @@ class BillcomSyncWizard(models.TransientModel):
         params = {}
 
         # Only active customers
-        params['archived'] = 'false'
+        params["archived"] = "false"
 
         # Add date filters (always use if available for better API performance)
         if self.date_from:
-            params['updatedDateStart'] = self.date_from.isoformat()
+            params["updatedDateStart"] = self.date_from.isoformat()
         if self.date_to:
-            params['updatedDateEnd'] = self.date_to.isoformat()
+            params["updatedDateEnd"] = self.date_to.isoformat()
 
         endpoint = "customers"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
 
         # Call BILL API with params dictionary
-        response = service._make_request(endpoint, method='GET', params=params)
+        response = service._make_request(endpoint, method="GET", params=params)
 
         # BILL API v3 returns data in 'results' array
-        customers_data = response.get('results', [])
+        customers_data = response.get("results", [])
 
-        if not customers_data and response.get('status') == 'error':
-            raise UserError(_(f"BILL API error: {response.get('errorMessage', 'Unknown error')}"))
+        if not customers_data and response.get("status") == "error":
+            raise UserError(
+                _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
+            )
 
         _logger.info(f"Fetched {len(customers_data)} customers from BILL")
 
         for customer_data in customers_data:
-            billcom_customer_id = customer_data.get('id')
+            billcom_customer_id = customer_data.get("id")
 
-            partner = self.env['res.partner'].search([
-                ('billcom_id', '=', billcom_customer_id)
-            ], limit=1)
+            partner = self.env["res.partner"].search(
+                [("billcom_id", "=", billcom_customer_id)], limit=1
+            )
 
             if self.filter_by_partner and self.partner_ids:
                 if partner and partner.id not in self.partner_ids.ids:
                     continue
 
-            queue_item = self.env["billcom.sync.queue"].create({
-                'sync_type': 'customer',
-                'record_model': 'res.partner',
-                'record_id': partner.id if partner else None,
-                'direction': self.sync_direction,
-                'operation': 'update' if partner else 'create',
-                'priority': self.priority,
-                'state': 'queued',
-                'billcom_id': billcom_customer_id,
-                'sync_data': str(customer_data),
-            })
+            queue_item = self.env["billcom.sync.queue"].create(
+                {
+                    "sync_type": "customer",
+                    "record_model": "res.partner",
+                    "record_id": partner.id if partner else None,
+                    "direction": self.sync_direction,
+                    "operation": "update" if partner else "create",
+                    "priority": self.priority,
+                    "state": "queued",
+                    "billcom_id": billcom_customer_id,
+                    "sync_data": str(customer_data),
+                }
+            )
             queue_items.append(queue_item)
 
         return queue_items
@@ -539,57 +549,61 @@ class BillcomSyncWizard(models.TransientModel):
         params = {}
 
         # Filter by payment status
-        params['paymentStatus'] = 'OPEN,APPROVED,PAID'
+        params["paymentStatus"] = "OPEN,APPROVED,PAID"
 
         # Add date filters (always use if available for better API performance)
         if self.date_from:
-            params['invoiceDateStart'] = self.date_from.isoformat()
+            params["invoiceDateStart"] = self.date_from.isoformat()
         if self.date_to:
-            params['invoiceDateEnd'] = self.date_to.isoformat()
+            params["invoiceDateEnd"] = self.date_to.isoformat()
 
         endpoint = "bills"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
 
         # Call BILL API with params dictionary
-        response = service._make_request(endpoint, method='GET', params=params)
+        response = service._make_request(endpoint, method="GET", params=params)
 
         # BILL API v3 returns data in 'results' array
-        bills_data = response.get('results', [])
+        bills_data = response.get("results", [])
 
-        if not bills_data and response.get('status') == 'error':
-            raise UserError(_(f"BILL API error: {response.get('errorMessage', 'Unknown error')}"))
+        if not bills_data and response.get("status") == "error":
+            raise UserError(
+                _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
+            )
 
         _logger.info(f"Fetched {len(bills_data)} bills from BILL")
 
         for bill_data in bills_data:
-            billcom_bill_id = bill_data.get('id')
+            billcom_bill_id = bill_data.get("id")
 
             # Check if bill exists in Odoo
-            move = self.env['account.move'].search([
-                ('billcom_id', '=', billcom_bill_id)
-            ], limit=1)
+            move = self.env["account.move"].search(
+                [("billcom_id", "=", billcom_bill_id)], limit=1
+            )
 
             # Apply partner filter if specified
             if self.filter_by_partner and self.partner_ids:
-                vendor_billcom_id = bill_data.get('vendorId')
-                vendor = self.env['res.partner'].search([
-                    ('billcom_id', '=', vendor_billcom_id)
-                ], limit=1)
+                vendor_billcom_id = bill_data.get("vendorId")
+                vendor = self.env["res.partner"].search(
+                    [("billcom_id", "=", vendor_billcom_id)], limit=1
+                )
                 if vendor and vendor.id not in self.partner_ids.ids:
                     continue
 
-            queue_item = self.env["billcom.sync.queue"].create({
-                'sync_type': 'bill',
-                'record_model': 'account.move',
-                'record_id': move.id if move else None,
-                'direction': self.sync_direction,
-                'operation': 'update' if move else 'create',
-                'priority': self.priority,
-                'state': 'queued',
-                'billcom_id': billcom_bill_id,
-                'sync_data': str(bill_data),
-            })
+            queue_item = self.env["billcom.sync.queue"].create(
+                {
+                    "sync_type": "bill",
+                    "record_model": "account.move",
+                    "record_id": move.id if move else None,
+                    "direction": self.sync_direction,
+                    "operation": "update" if move else "create",
+                    "priority": self.priority,
+                    "state": "queued",
+                    "billcom_id": billcom_bill_id,
+                    "sync_data": str(bill_data),
+                }
+            )
             queue_items.append(queue_item)
 
         return queue_items
@@ -603,57 +617,61 @@ class BillcomSyncWizard(models.TransientModel):
         params = {}
 
         # Status filter
-        params['status'] = 'SCHEDULED,INPROCESS,COMPLETED'
+        params["status"] = "SCHEDULED,INPROCESS,COMPLETED"
 
         # Add date filters (always use if available for better API performance)
         if self.date_from:
-            params['processDateStart'] = self.date_from.isoformat()
+            params["processDateStart"] = self.date_from.isoformat()
         if self.date_to:
-            params['processDateEnd'] = self.date_to.isoformat()
+            params["processDateEnd"] = self.date_to.isoformat()
 
         endpoint = "payments"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
 
         # Call BILL API with params dictionary
-        response = service._make_request(endpoint, method='GET', params=params)
+        response = service._make_request(endpoint, method="GET", params=params)
 
         # BILL API v3 returns data in 'results' array
-        payments_data = response.get('results', [])
+        payments_data = response.get("results", [])
 
-        if not payments_data and response.get('status') == 'error':
-            raise UserError(_(f"BILL API error: {response.get('errorMessage', 'Unknown error')}"))
+        if not payments_data and response.get("status") == "error":
+            raise UserError(
+                _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
+            )
 
         _logger.info(f"Fetched {len(payments_data)} payments from BILL")
 
         for payment_data in payments_data:
-            billcom_payment_id = payment_data.get('id')
+            billcom_payment_id = payment_data.get("id")
 
             # Check if payment exists in Odoo
-            payment = self.env['account.payment'].search([
-                ('billcom_id', '=', billcom_payment_id)
-            ], limit=1)
+            payment = self.env["account.payment"].search(
+                [("billcom_id", "=", billcom_payment_id)], limit=1
+            )
 
             # Apply partner filter if specified
             if self.filter_by_partner and self.partner_ids:
-                vendor_billcom_id = payment_data.get('vendorId')
-                vendor = self.env['res.partner'].search([
-                    ('billcom_id', '=', vendor_billcom_id)
-                ], limit=1)
+                vendor_billcom_id = payment_data.get("vendorId")
+                vendor = self.env["res.partner"].search(
+                    [("billcom_id", "=", vendor_billcom_id)], limit=1
+                )
                 if vendor and vendor.id not in self.partner_ids.ids:
                     continue
 
-            queue_item = self.env["billcom.sync.queue"].create({
-                'sync_type': 'payment',
-                'record_model': 'account.payment',
-                'record_id': payment.id if payment else None,
-                'direction': self.sync_direction,
-                'operation': 'update' if payment else 'create',
-                'priority': self.priority,
-                'state': 'queued',
-                'billcom_id': billcom_payment_id,
-                'sync_data': str(payment_data),
-            })
+            queue_item = self.env["billcom.sync.queue"].create(
+                {
+                    "sync_type": "payment",
+                    "record_model": "account.payment",
+                    "record_id": payment.id if payment else None,
+                    "direction": self.sync_direction,
+                    "operation": "update" if payment else "create",
+                    "priority": self.priority,
+                    "state": "queued",
+                    "billcom_id": billcom_payment_id,
+                    "sync_data": str(payment_data),
+                }
+            )
             queue_items.append(queue_item)
 
         return queue_items
@@ -667,57 +685,61 @@ class BillcomSyncWizard(models.TransientModel):
         params = {}
 
         # Filter by status
-        params['status'] = 'OPEN,APPROVED,PAID'
+        params["status"] = "OPEN,APPROVED,PAID"
 
         # Add date filters (always use if available for better API performance)
         if self.date_from:
-            params['invoiceDateStart'] = self.date_from.isoformat()
+            params["invoiceDateStart"] = self.date_from.isoformat()
         if self.date_to:
-            params['invoiceDateEnd'] = self.date_to.isoformat()
+            params["invoiceDateEnd"] = self.date_to.isoformat()
 
         endpoint = "invoices"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
 
         # Call BILL API with params dictionary
-        response = service._make_request(endpoint, method='GET', params=params)
+        response = service._make_request(endpoint, method="GET", params=params)
 
         # BILL API v3 returns data in 'results' array
-        invoices_data = response.get('results', []) if response else []
+        invoices_data = response.get("results", []) if response else []
 
-        if not invoices_data and response and response.get('status') == 'error':
-            raise UserError(_(f"BILL API error: {response.get('errorMessage', 'Unknown error')}"))
+        if not invoices_data and response and response.get("status") == "error":
+            raise UserError(
+                _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
+            )
 
         _logger.info(f"Fetched {len(invoices_data)} invoices from BILL")
 
         for invoice_data in invoices_data:
-            billcom_invoice_id = invoice_data.get('id')
+            billcom_invoice_id = invoice_data.get("id")
 
             # Check if invoice exists in Odoo
-            move = self.env['account.move'].search([
-                ('billcom_id', '=', billcom_invoice_id)
-            ], limit=1)
+            move = self.env["account.move"].search(
+                [("billcom_id", "=", billcom_invoice_id)], limit=1
+            )
 
             # Apply partner filter if specified
             if self.filter_by_partner and self.partner_ids:
-                customer_billcom_id = invoice_data.get('customer', {}).get('id')
-                customer = self.env['res.partner'].search([
-                    ('billcom_id', '=', customer_billcom_id)
-                ], limit=1)
+                customer_billcom_id = invoice_data.get("customer", {}).get("id")
+                customer = self.env["res.partner"].search(
+                    [("billcom_id", "=", customer_billcom_id)], limit=1
+                )
                 if customer and customer.id not in self.partner_ids.ids:
                     continue
 
-            queue_item = self.env["billcom.sync.queue"].create({
-                'sync_type': 'invoice',
-                'record_model': 'account.move',
-                'record_id': move.id if move else None,
-                'direction': self.sync_direction,
-                'operation': 'update' if move else 'create',
-                'priority': self.priority,
-                'state': 'queued',
-                'billcom_id': billcom_invoice_id,
-                'sync_data': str(invoice_data),
-            })
+            queue_item = self.env["billcom.sync.queue"].create(
+                {
+                    "sync_type": "invoice",
+                    "record_model": "account.move",
+                    "record_id": move.id if move else None,
+                    "direction": self.sync_direction,
+                    "operation": "update" if move else "create",
+                    "priority": self.priority,
+                    "state": "queued",
+                    "billcom_id": billcom_invoice_id,
+                    "sync_data": str(invoice_data),
+                }
+            )
             queue_items.append(queue_item)
 
         return queue_items
@@ -912,7 +934,18 @@ class BillcomSyncWizard(models.TransientModel):
         return queue_items
 
     def _create_document_sync_items(self):
-        """Create sync items for Bill.com documents"""
+        """Create sync items for Bill.com documents
+
+        Note: Documents are only synced in Odoo → Bill.com direction.
+        Documents from Bill.com are synced automatically when bills are synced.
+        """
+        # Documents only sync from Odoo to Bill.com (upload)
+        if self.sync_direction == "from_billcom":
+            _logger.info(
+                "Document sync skipped: Documents are synced automatically when bills are synced from Bill.com"
+            )
+            return []
+
         # Find billcom.document records that need to be synced
         domain = [
             ("bill_id", "!=", False),
@@ -968,7 +1001,9 @@ class BillcomSyncWizard(models.TransientModel):
                         item.write({"state": "error"})
                         total_errors += 1
                 except Exception as e:
-                    _logger.error(f"Error processing {item.sync_type} item {item.id} from Bill.com: {e}")
+                    _logger.error(
+                        f"Error processing {item.sync_type} item {item.id} from Bill.com: {e}"
+                    )
                     item.write({"state": "error", "error_message": str(e)})
                     total_errors += 1
         else:
@@ -1000,7 +1035,11 @@ class BillcomSyncWizard(models.TransientModel):
 
                     # Normalize result keys (some methods return 'synced', others 'processed')
                     processed_count = result.get("processed", result.get("synced", 0))
-                    error_count = len(result.get("errors", [])) if isinstance(result.get("errors"), list) else result.get("errors", 0)
+                    error_count = (
+                        len(result.get("errors", []))
+                        if isinstance(result.get("errors"), list)
+                        else result.get("errors", 0)
+                    )
 
                     total_processed += processed_count
                     total_errors += error_count

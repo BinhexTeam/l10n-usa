@@ -83,16 +83,46 @@
                         <page string="API Credentials" name="credentials">
                             <group>
                                 <group string="Authentication">
-                                    <field name="username" placeholder="Bill.com Username" />
-                                    <field name="password" password="True" placeholder="Bill.com Password" />
-                                    <field name="organization_id" placeholder="Organization ID" />
-                                    <field name="dev_key" password="True" placeholder="Developer Key" />
-                                    <field name="user_id" placeholder="User ID (optional)" />
+                                    <field
+                                        name="username"
+                                        placeholder="Bill.com Username"
+                                    />
+                                    <field
+                                        name="password"
+                                        password="True"
+                                        placeholder="Bill.com Password"
+                                    />
+                                    <field
+                                        name="organization_id"
+                                        placeholder="Organization ID"
+                                    />
+                                    <field
+                                        name="dev_key"
+                                        password="True"
+                                        placeholder="Developer Key"
+                                    />
+                                    <field
+                                        name="user_id"
+                                        placeholder="User ID (optional)"
+                                    />
                                 </group>
                                 <group string="MFA Configuration">
-                                    <field name="mfa_device_id" password="True" placeholder="Device ID (Option 1)" />
-                                    <field name="mfa_remember_me_id" password="True" placeholder="Remember Me ID (Option 2)" />
-                                    <field name="mfa_device_name" placeholder="Odoo Integration" />
+                                    <field
+                                        name="mfa_device_id"
+                                        password="True"
+                                        placeholder="Device ID (Option 1)"
+                                    />
+                                    <field
+                                        name="mfa_remember_me_id"
+                                        password="True"
+                                        placeholder="Remember Me ID (Option 2)"
+                                    />
+                                    <field
+                                        name="mfa_device_name"
+                                        placeholder="Odoo Integration"
+                                    />
+
+                                    <!-- Setup MFA button (shown when NOT configured) -->
                                     <button
                                         name="action_setup_mfa"
                                         type="object"
@@ -101,19 +131,41 @@
                                         icon="fa-shield"
                                         attrs="{'invisible': [('mfa_remember_me_id', '!=', False)]}"
                                     />
-                                    <div class="text-muted" attrs="{'invisible': [('mfa_remember_me_id', '=', False)]}">
-                                        <i class="fa fa-check-circle text-success"/> MFA configured (valid 30 days)
+
+                                    <!-- Renew MFA button (shown when configured) -->
+                                    <button
+                                        name="action_setup_mfa"
+                                        type="object"
+                                        string="Renew MFA"
+                                        class="btn-warning"
+                                        icon="fa-refresh"
+                                        attrs="{'invisible': [('mfa_remember_me_id', '=', False)]}"
+                                        help="Generate a new Remember Me ID with updated settings (valid 30 days)"
+                                    />
+
+                                    <div
+                                        class="text-muted"
+                                        attrs="{'invisible': [('mfa_remember_me_id', '=', False)]}"
+                                    >
+                                        <i
+                                            class="fa fa-check-circle text-success"
+                                        /> MFA configured (valid 30 days)
                                     </div>
-                                    <div class="alert alert-info" attrs="{'invisible': [('mfa_remember_me_id', '!=', False)]}">
+                                    <div
+                                        class="alert alert-info"
+                                        attrs="{'invisible': [('mfa_remember_me_id', '!=', False)]}"
+                                    >
                                         <strong>MFA Required for Payments:</strong>
-                                        <p><strong>Option 1 (Manual):</strong> Obtain Device ID from browser cookies</p>
-                                        <p><strong>Option 2 (Automated):</strong> Click 'Setup MFA' button</p>
+                                        <p><strong
+                                            >Option 1 (Manual):</strong> Obtain Device ID from browser cookies</p>
+                                        <p><strong
+                                            >Option 2 (Automated):</strong> Click 'Setup MFA' button</p>
                                     </div>
                                 </group>
                                 <group string="API Configuration">
                                     <field name="api_max_retries" />
                                     <field name="api_retry_delay" />
-                                    <label for="api_max_retries" string=""/>
+                                    <label for="api_max_retries" string="" />
                                     <div class="text-muted">
                                         Configure retry logic for API requests.
                                         Retries help handle temporary network issues.
@@ -139,7 +191,7 @@
                                     />
                                 </group>
                             </group>
-                            <separator string="Automatic Synchronization"/>
+                            <separator string="Automatic Synchronization" />
                             <group>
                                 <group>
                                     <field name="auto_sync_enabled" />
@@ -150,9 +202,18 @@
                                     />
                                 </group>
                                 <group>
-                                    <div class="alert alert-info" attrs="{'invisible': [('auto_sync_enabled', '=', False)]}">
-                                        <i class="fa fa-info-circle"/> Automatic sync will run every
-                                        <field name="sync_interval" readonly="1" class="oe_inline"/> minutes
+                                    <div
+                                        class="alert alert-info"
+                                        attrs="{'invisible': [('auto_sync_enabled', '=', False)]}"
+                                    >
+                                        <i
+                                            class="fa fa-info-circle"
+                                        /> Automatic sync will run every
+                                        <field
+                                            name="sync_interval"
+                                            readonly="1"
+                                            class="oe_inline"
+                                        /> minutes
                                     </div>
                                 </group>
                             </group>
@@ -189,16 +250,22 @@
                                         readonly="1"
                                     />
                                 </group>
-                                <group/>
+                                <group />
                             </group>
 
                             <!-- Webhook Actions Section -->
-                            <div attrs="{'invisible': [('enable_webhooks', '=', False)]}" class="mt16">
-                                <separator string="Webhook Actions"/>
+                            <div
+                                attrs="{'invisible': [('enable_webhooks', '=', False)]}"
+                                class="mt16"
+                            >
+                                <separator string="Webhook Actions" />
                                 <div class="row mt8">
                                     <div class="col-12">
                                         <!-- Primary Actions -->
-                                        <div class="oe_button_box" name="webhook_actions">
+                                        <div
+                                            class="oe_button_box"
+                                            name="webhook_actions"
+                                        >
                                             <button
                                                 name="button_subscribe_webhooks"
                                                 type="object"
@@ -244,20 +311,40 @@
                             </div>
 
                             <!-- Webhook Events Section -->
-                            <separator string="Webhook Events" attrs="{'invisible': [('enable_webhooks', '=', False)]}"/>
-                            <group attrs="{'invisible': [('enable_webhooks', '=', False)]}">
+                            <separator
+                                string="Webhook Events"
+                                attrs="{'invisible': [('enable_webhooks', '=', False)]}"
+                            />
+                            <group
+                                attrs="{'invisible': [('enable_webhooks', '=', False)]}"
+                            >
                                 <group string="Business Events">
-                                    <field name="webhook_event_bills" string="Bills (Created, Updated, Archived, Restored)" />
-                                    <field name="webhook_event_vendors" string="Vendors (Created, Updated, Archived, Restored)" />
+                                    <field
+                                        name="webhook_event_bills"
+                                        string="Bills (Created, Updated, Archived, Restored)"
+                                    />
+                                    <field
+                                        name="webhook_event_vendors"
+                                        string="Vendors (Created, Updated, Archived, Restored)"
+                                    />
                                 </group>
                                 <group string="Financial Events">
-                                    <field name="webhook_event_payments" string="Payments (Updated, Failed)" />
-                                    <field name="webhook_event_bank_accounts" string="Bank Accounts (Created, Updated, Archived)" />
+                                    <field
+                                        name="webhook_event_payments"
+                                        string="Payments (Updated, Failed)"
+                                    />
+                                    <field
+                                        name="webhook_event_bank_accounts"
+                                        string="Bank Accounts (Created, Updated, Archived)"
+                                    />
                                 </group>
                             </group>
 
                             <!-- Webhook Error Alert -->
-                            <div class="alert alert-warning" attrs="{'invisible': ['|', ('enable_webhooks', '=', False), ('webhook_subscription_state', '!=', 'error')]}">
+                            <div
+                                class="alert alert-warning"
+                                attrs="{'invisible': ['|', ('enable_webhooks', '=', False), ('webhook_subscription_state', '!=', 'error')]}"
+                            >
                                 <strong>Webhook Error:</strong>
                                 <field name="webhook_last_error" readonly="1" />
                             </div>
@@ -267,8 +354,14 @@
                         <page string="Advanced" name="advanced">
                             <group string="Scheduled Actions Intervals">
                                 <group>
-                                    <field name="full_sync_interval" string="Full Sync (minutes)" />
-                                    <field name="payment_sync_interval" string="Payment Sync (minutes)" />
+                                    <field
+                                        name="full_sync_interval"
+                                        string="Full Sync (minutes)"
+                                    />
+                                    <field
+                                        name="payment_sync_interval"
+                                        string="Payment Sync (minutes)"
+                                    />
                                     <field
                                         name="payment_status_check_interval"
                                         string="Payment Status Check (minutes)"
@@ -312,18 +405,57 @@
                 decoration-muted="active == False"
             >
                 <field name="name" />
-                <field name="environment" widget="badge" decoration-info="environment=='sandbox'" decoration-success="environment=='production'" />
-                <field name="company_id" groups="base.group_multi_company" optional="show" />
-                <field name="state" widget="badge" decoration-success="state=='connected'" decoration-danger="state=='error'" decoration-warning="state=='draft'" />
-                <field name="webhook_subscription_state" string="Webhooks" widget="badge"
+                <field
+                    name="environment"
+                    widget="badge"
+                    decoration-info="environment=='sandbox'"
+                    decoration-success="environment=='production'"
+                />
+                <field
+                    name="company_id"
+                    groups="base.group_multi_company"
+                    optional="show"
+                />
+                <field
+                    name="state"
+                    widget="badge"
+                    decoration-success="state=='connected'"
+                    decoration-danger="state=='error'"
+                    decoration-warning="state=='draft'"
+                />
+                <field
+                    name="webhook_subscription_state"
+                    string="Webhooks"
+                    widget="badge"
                     decoration-success="webhook_subscription_state=='subscribed'"
                     decoration-info="webhook_subscription_state=='not_subscribed'"
                     decoration-danger="webhook_subscription_state=='error'"
-                    optional="show" />
-                <field name="sync_vendors" string="Vendors" widget="boolean_toggle" optional="hide" />
-                <field name="sync_customers" string="Customers" widget="boolean_toggle" optional="hide" />
-                <field name="sync_bills" string="Bills" widget="boolean_toggle" optional="hide" />
-                <field name="sync_payments" string="Payments" widget="boolean_toggle" optional="hide" />
+                    optional="show"
+                />
+                <field
+                    name="sync_vendors"
+                    string="Vendors"
+                    widget="boolean_toggle"
+                    optional="hide"
+                />
+                <field
+                    name="sync_customers"
+                    string="Customers"
+                    widget="boolean_toggle"
+                    optional="hide"
+                />
+                <field
+                    name="sync_bills"
+                    string="Bills"
+                    widget="boolean_toggle"
+                    optional="hide"
+                />
+                <field
+                    name="sync_payments"
+                    string="Payments"
+                    widget="boolean_toggle"
+                    optional="hide"
+                />
                 <field name="last_connection_test" optional="show" />
                 <field name="active" invisible="1" />
             </tree>

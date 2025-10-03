@@ -1,6 +1,6 @@
 import logging
 
-from odoo import api, fields, models, _
+from odoo import _, api, fields, models
 
 _logger = logging.getLogger(__name__)
 
@@ -203,6 +203,8 @@ class AccountMove(models.Model):
                         "billcom": result.get("id"),
                         "billcom_id": result.get("id"),
                         "last_sync_date": fields.Datetime.now(),
+                        "billcom_sync_status": "synced",
+                        "billcom_sync_error": False,
                     }
                 )
                 _logger.info("Successfully synced %s with Bill.com", self.name)
@@ -223,6 +225,15 @@ class AccountMove(models.Model):
                 return result
 
             # Post error if no ID in response
+            error_msg = (
+                f"Unexpected response format from Bill.com API. Response: {result}"
+            )
+            self.with_context(skip_billcom_sync=True).write(
+                {
+                    "billcom_sync_status": "sync_failed",
+                    "billcom_sync_error": error_msg,
+                }
+            )
             self.message_post(
                 body=f"<p><strong>Bill.com Sync Failed</strong></p>"
                 f"<p>Unexpected response format from Bill.com API</p>"
@@ -239,6 +250,14 @@ class AccountMove(models.Model):
             friendly_message = service._extract_friendly_error(e)
 
             _logger.error("Error syncing %s to Bill.com: %s", self.name, error_detail)
+
+            # Set sync status to failed
+            self.with_context(skip_billcom_sync=True).write(
+                {
+                    "billcom_sync_status": "sync_failed",
+                    "billcom_sync_error": friendly_message,
+                }
+            )
 
             # Post detailed error to chatter
             self.message_post(
@@ -310,15 +329,18 @@ class AccountMove(models.Model):
         """
         self.ensure_one()
 
-        if self.move_type != 'in_invoice':
+        if self.move_type != "in_invoice":
             from odoo.exceptions import UserError
+
             raise UserError(_("This action is only available for vendor bills"))
 
         # Find all attachments for this bill
-        attachments = self.env['ir.attachment'].search([
-            ('res_model', '=', 'account.move'),
-            ('res_id', '=', self.id),
-        ])
+        attachments = self.env["ir.attachment"].search(
+            [
+                ("res_model", "=", "account.move"),
+                ("res_id", "=", self.id),
+            ]
+        )
 
         if not attachments:
             return {
@@ -338,7 +360,9 @@ class AccountMove(models.Model):
 
         for attachment in attachments:
             try:
-                document = self.env['billcom.document'].create_from_attachment(attachment)
+                document = self.env["billcom.document"].create_from_attachment(
+                    attachment
+                )
                 if document:
                     # Check if it was newly created or already existed
                     if document.create_date == fields.Datetime.now():
@@ -349,7 +373,7 @@ class AccountMove(models.Model):
                 _logger.warning(
                     "Failed to create document from attachment %d: %s",
                     attachment.id,
-                    str(e)
+                    str(e),
                 )
 
         # Post to chatter
@@ -371,7 +395,10 @@ class AccountMove(models.Model):
             "tag": "display_notification",
             "params": {
                 "title": _("Attachments Synced"),
-                "message": _("Created %d new Bill.com document(s) from %d attachment(s)") % (created_count, len(attachments)),
+                "message": _(
+                    "Created %d new Bill.com document(s) from %d attachment(s)"
+                )
+                % (created_count, len(attachments)),
                 "type": "success",
                 "sticky": False,
             },

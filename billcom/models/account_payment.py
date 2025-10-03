@@ -160,6 +160,7 @@ class AccountPayment(models.Model):
 
         # Determine process date
         # WALLET type requires processDate
+        # processDate format "2025-12-31"
         if funding_type == "WALLET":
             process_date = (
                 self.billcom_process_date.isoformat()
@@ -168,11 +169,7 @@ class AccountPayment(models.Model):
             )
         else:
             # Optional for other types - if not set, uses next available payment date
-            process_date = (
-                self.billcom_process_date.isoformat()
-                if self.billcom_process_date
-                else None
-            )
+            process_date = None
 
         # Determine if we should create a bill or pay an existing one
         # If there's a linked bill with Bill.com ID, we pay it
@@ -298,6 +295,8 @@ class AccountPayment(models.Model):
                     ),
                     "billcom_confirmation_number": result.get("confirmationNumber", ""),
                     "billcom_transaction_number": result.get("transactionNumber", ""),
+                    "billcom_sync_status": "synced",
+                    "billcom_sync_error": False,  # Clear any previous error
                 }
 
                 # Update exchange rate and funding amount for international payments
@@ -326,6 +325,15 @@ class AccountPayment(models.Model):
                 return result
 
             # Post error if no ID in response
+            error_msg = (
+                f"Unexpected response format from Bill.com API. Response: {result}"
+            )
+            self.with_context(skip_billcom_sync=True).write(
+                {
+                    "billcom_sync_status": "sync_failed",
+                    "billcom_sync_error": error_msg,
+                }
+            )
             self.message_post(
                 body=f"<p><strong>Bill.com Payment Sync Failed</strong></p>"
                 f"<p>Unexpected response format from Bill.com API</p>"
@@ -343,6 +351,14 @@ class AccountPayment(models.Model):
 
             _logger.error(
                 "Error syncing payment %s to Bill.com: %s", self.name, error_detail
+            )
+
+            # Set sync status to failed
+            self.with_context(skip_billcom_sync=True).write(
+                {
+                    "billcom_sync_status": "sync_failed",
+                    "billcom_sync_error": friendly_message,
+                }
             )
 
             # Post detailed error to chatter

@@ -115,6 +115,8 @@ class BillcomService(models.AbstractModel):
                         "billcom": partner_id,
                         "billcom_id": partner_id,
                         "last_sync_date": fields.Datetime.now(),
+                        "billcom_sync_status": "synced",
+                        "billcom_sync_error": False,
                     }
                 )
 
@@ -160,13 +162,22 @@ class BillcomService(models.AbstractModel):
 
                 return partner_id
             else:
-                error_msg = "Unexpected response format from Bill.com API"
+                error_msg = (
+                    f"Unexpected response format from Bill.com API. Response: {result}"
+                )
                 _logger.warning(
                     "%s for %s %s: %s",
                     error_msg,
                     partner_type,
                     partner.name,
                     result,
+                )
+                # Set sync status to failed
+                partner.with_context(skip_billcom_sync=True).write(
+                    {
+                        "billcom_sync_status": "sync_failed",
+                        "billcom_sync_error": error_msg,
+                    }
                 )
                 # Post error to chatter
                 partner.message_post(
@@ -188,6 +199,14 @@ class BillcomService(models.AbstractModel):
                 partner_type.title(),
                 partner.name,
                 error_detail,
+            )
+
+            # Set sync status to failed
+            partner.with_context(skip_billcom_sync=True).write(
+                {
+                    "billcom_sync_status": "sync_failed",
+                    "billcom_sync_error": friendly_message,
+                }
             )
 
             # Post detailed error to chatter
@@ -1337,6 +1356,12 @@ class BillcomService(models.AbstractModel):
                 return self._process_invoice_from_billcom(queue_item, billcom_data)
             elif queue_item.sync_type == "payment":
                 return self._process_payment_from_billcom(queue_item, billcom_data)
+            elif queue_item.sync_type == "document":
+                _logger.info(
+                    "Sync from BILL not supported for type: document. "
+                    "Documents are synced via sync_documents_from_billcom() method"
+                )
+                return False
             else:
                 _logger.warning(f"Unknown sync_type: {queue_item.sync_type}")
                 return False
@@ -2086,6 +2111,9 @@ class BillcomService(models.AbstractModel):
         """
         import requests
 
+        challenge_url = None  # Initialize for error logging
+        headers = {}  # Initialize for error logging
+
         try:
             # If no session_id provided, do basic login first
             if not session_id:
@@ -2099,9 +2127,14 @@ class BillcomService(models.AbstractModel):
                 "devKey": config.dev_key,
             }
 
-            # POST with empty JSON body
+            # POST with useBackup parameter
+            # Set useBackup to false to use primary device (default)
+            payload = {"useBackup": False}  # Use primary device
+
+            _logger.info("Generating MFA challenge with payload: %s", payload)
+
             response = requests.post(
-                challenge_url, json={}, headers=headers, timeout=30
+                challenge_url, json=payload, headers=headers, timeout=30
             )
             response.raise_for_status()
 
@@ -2124,8 +2157,10 @@ class BillcomService(models.AbstractModel):
 
         except requests.exceptions.RequestException as e:
             _logger.error("Failed to generate MFA challenge: %s", str(e))
-            _logger.error("Request URL: %s", challenge_url)
-            _logger.error("Request headers: %s", headers)
+            if challenge_url:
+                _logger.error("Request URL: %s", challenge_url)
+            if headers:
+                _logger.error("Request headers: %s", headers)
             if hasattr(e, "response") and e.response is not None:
                 _logger.error("Response status: %s", e.response.status_code)
                 _logger.error("Response body: %s", e.response.text)
@@ -2191,9 +2226,14 @@ class BillcomService(models.AbstractModel):
                 "devKey": config.dev_key,
             }
 
+            # Get device name from config or use default
+            device_name = config.mfa_device_name or "Odoo Integration"
+
             payload = {
                 "challengeId": challenge_id,
                 "token": mfa_code,
+                "device": device_name,
+                "machineName": device_name,  # Use same as device
                 "rememberMe": True,  # Request Remember Me ID
             }
 

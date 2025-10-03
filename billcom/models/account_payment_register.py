@@ -1,6 +1,6 @@
 import logging
 
-from odoo import _, api, fields, models
+from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
 
@@ -121,16 +121,29 @@ class AccountPaymentRegister(models.TransientModel):
                     try:
                         # Try to sync the payment with Bill.com
                         payment.button_sync_to_billcom()
+                        # If sync succeeds, status is already set to 'synced' by button_sync_to_billcom
                     except Exception as e:
-                        _logger.error("Error syncing payment to Bill.com: %s", str(e))
-                        # Show a message to the user but don't interrupt the process
-                        self.env.user.notify_warning(
-                            title=_("Bill.com Sync Warning"),
-                            message=_(
-                                "Payment created but could not be synced to Bill.com: %s"
-                            )
-                            % str(e),
-                            sticky=True,
+                        _logger.warning(
+                            "Payment %s created but could not be synced to Bill.com: %s",
+                            payment.name,
+                            str(e),
+                        )
+                        # Set sync status to failed
+                        payment.sudo().write(
+                            {
+                                "billcom_sync_status": "sync_failed",
+                                "billcom_sync_error": str(e),
+                            }
+                        )
+                        # Post warning to payment chatter
+                        payment.message_post(
+                            body=f"<p><strong>Bill.com Sync Warning</strong></p>"
+                            f"<p>Payment created successfully but could not be synced to Bill.com.</p>"
+                            f"<p><strong>Error:</strong></p>"
+                            f"<pre>{str(e)}</pre>"
+                            f"<p><em>You can manually sync this payment later from the payment form.</em></p>",
+                            message_type="notification",
+                            subtype_xmlid="mail.mt_note",
                         )
 
         return payments
