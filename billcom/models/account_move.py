@@ -31,6 +31,9 @@ class AccountMove(models.Model):
         if self.move_type != "in_invoice":
             return False
 
+        # Get billcom.item model for tax mapping
+        item_model = self.env["billcom.item"]
+
         # Prepare line items
         lines = []
         for line in self.invoice_line_ids:
@@ -38,6 +41,21 @@ class AccountMove(models.Model):
                 "description": line.name or "",
                 "amount": line.price_subtotal,
             }
+
+            # Add tax items if line has taxes
+            if line.tax_ids:
+                for tax in line.tax_ids:
+                    # Get or create Bill.com item for this tax
+                    tax_item_id = item_model.get_item_for_tax(tax)
+                    if tax_item_id:
+                        line_data["itemId"] = tax_item_id
+                        _logger.info(
+                            "Added tax item %s to bill line for tax %s",
+                            tax_item_id,
+                            tax.name,
+                        )
+                        break  # Use first tax item found
+
             lines.append(line_data)
 
         # Build bill data according to Bill.com API v3 format
@@ -68,6 +86,9 @@ class AccountMove(models.Model):
         if self.move_type != "out_invoice":
             return False
 
+        # Get billcom.item model for tax mapping
+        item_model = self.env["billcom.item"]
+
         # Prepare line items
         lines = []
         for line in self.invoice_line_ids:
@@ -76,13 +97,27 @@ class AccountMove(models.Model):
                 "quantity": line.quantity,
                 "price": line.price_unit,
             }
-            # Optional: include itemId if product has Bill.com reference
+
+            # Priority 1: include itemId if product has Bill.com reference
             if (
                 line.product_id
                 and hasattr(line.product_id, "billcom_id")
                 and line.product_id.billcom_id
             ):
                 line_data["itemId"] = line.product_id.billcom_id
+            # Priority 2: Add tax items if line has taxes and no product item
+            elif line.tax_ids:
+                for tax in line.tax_ids:
+                    # Get or create Bill.com item for this tax
+                    tax_item_id = item_model.get_item_for_tax(tax)
+                    if tax_item_id:
+                        line_data["itemId"] = tax_item_id
+                        _logger.info(
+                            "Added tax item %s to invoice line for tax %s",
+                            tax_item_id,
+                            tax.name,
+                        )
+                        break  # Use first tax item found
 
             lines.append(line_data)
 

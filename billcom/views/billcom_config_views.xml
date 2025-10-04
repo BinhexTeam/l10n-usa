@@ -36,7 +36,7 @@
                         attrs="{'invisible': [('state', '!=', 'connected')]}"
                     />
                     <button
-                        name="sync_primary_data"
+                        name="button_sync_primary_data"
                         type="object"
                         string="Sync Primary Data"
                         class="btn-secondary"

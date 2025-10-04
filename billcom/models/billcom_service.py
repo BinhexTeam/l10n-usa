@@ -4,6 +4,8 @@ import time
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
+from .billcom_document import parse_billcom_datetime
+
 _logger = logging.getLogger(__name__)
 
 
@@ -223,6 +225,193 @@ class BillcomService(models.AbstractModel):
                 _("Failed to sync %s to Bill.com:\n\n%s")
                 % (partner_type, friendly_message)
             ) from e
+
+    def sync_item(self, item):
+        """Sync single item to Bill.com
+
+        Args:
+            item: billcom.item record
+
+        Returns:
+            str: Bill.com item ID or False
+        """
+        if not item.is_sync_to_billcom:
+            _logger.info("Item %s not marked for sync to Bill.com", item.name)
+            return False
+
+        # Use context to prevent infinite loops
+        if self.env.context.get("skip_billcom_sync"):
+            _logger.info("Skipping sync for item %s due to context", item.name)
+            return False
+
+        # Prepare item data
+        item_data = item._prepare_item_data()
+        _logger.info("Item data prepared for %s: %s", item.name, item_data)
+
+        if not item_data:
+            _logger.warning("No data prepared for item %s", item.name)
+            return False
+
+        # Make request to Bill.com API
+        try:
+            # Check if item already exists in Bill.com
+            existing_id = item.billcom_id or item.billcom
+
+            if existing_id:
+                # Update existing item
+                _logger.info(
+                    "Updating existing item with ID %s in Bill.com", existing_id
+                )
+                result = self._make_request(
+                    f"classifications/items/{existing_id}",
+                    method="PATCH",
+                    data=item_data,
+                )
+            else:
+                # Create new item
+                _logger.info("Creating new item in Bill.com")
+                result = self._make_request(
+                    "classifications/items", method="POST", data=item_data
+                )
+
+            _logger.debug("Bill.com API response for item %s: %s", item.name, result)
+
+            # Process successful response
+            if result and result.get("id"):
+                item_id = result.get("id")
+                action = "updated" if existing_id else "created"
+
+                # Update item with Bill.com data
+                update_vals = {
+                    "billcom": item_id,
+                    "billcom_id": item_id,
+                    "last_sync_date": fields.Datetime.now(),
+                    "billcom_sync_status": "synced",
+                    "billcom_sync_error": False,
+                }
+
+                # Update timestamps from Bill.com
+                # Convert ISO datetime strings to Odoo datetime format
+                if result.get("createdTime"):
+                    created_dt = parse_billcom_datetime(result.get("createdTime"))
+                    if created_dt:
+                        update_vals["created_time"] = created_dt
+
+                if result.get("updatedTime"):
+                    updated_dt = parse_billcom_datetime(result.get("updatedTime"))
+                    if updated_dt:
+                        update_vals["updated_time"] = updated_dt
+
+                item.with_context(skip_billcom_sync=True).write(update_vals)
+
+                _logger.info(
+                    "Successfully synced item %s to Bill.com with ID: %s",
+                    item.name,
+                    item_id,
+                )
+
+                # Post success message to chatter
+                item.message_post(
+                    body=f"<p><strong>Bill.com Sync Successful</strong></p>"
+                    f"<ul>"
+                    f"<li>Type: {item.type}</li>"
+                    f"<li>Action: {action.title()}</li>"
+                    f"<li>Bill.com ID: {item_id}</li>"
+                    f"</ul>",
+                    message_type="notification",
+                    subtype_xmlid="mail.mt_note",
+                )
+
+                return item_id
+            else:
+                error_msg = (
+                    f"Unexpected response format from Bill.com API. Response: {result}"
+                )
+                _logger.warning("%s for item %s", error_msg, item.name)
+                # Set sync status to failed
+                item.with_context(skip_billcom_sync=True).write(
+                    {
+                        "billcom_sync_status": "sync_failed",
+                        "billcom_sync_error": error_msg,
+                    }
+                )
+                # Post error to chatter
+                item.message_post(
+                    body=f"<p><strong>Bill.com Sync Failed</strong></p>"
+                    f"<p>{error_msg}</p>",
+                    message_type="notification",
+                    subtype_xmlid="mail.mt_note",
+                )
+                return False
+        except Exception as e:
+            error_detail = str(e)
+
+            # Try to extract user-friendly error message from HTTP exception
+            friendly_message = self._extract_friendly_error(e)
+
+            _logger.error("Item sync failed for %s: %s", item.name, error_detail)
+
+            # Set sync status to failed
+            item.with_context(skip_billcom_sync=True).write(
+                {
+                    "billcom_sync_status": "sync_failed",
+                    "billcom_sync_error": friendly_message,
+                }
+            )
+
+            # Post detailed error to chatter
+            item.message_post(
+                body=f"<p><strong>Bill.com Sync Error</strong></p>"
+                f"<p>Failed to sync item to Bill.com</p>"
+                f"<p><strong>Error:</strong> {friendly_message}</p>",
+                message_type="notification",
+                subtype_xmlid="mail.mt_note",
+            )
+
+            # Raise user-friendly error
+            raise UserError(
+                _("Failed to sync item to Bill.com:\n\n%s") % friendly_message
+            ) from e
+
+    def get_items(self, item_type=None):
+        """Get items (classifications) from Bill.com
+
+        Args:
+            item_type (str, optional): Filter by item type (e.g., 'SALES_TAX')
+
+        Returns:
+            list: List of item dictionaries from Bill.com API
+        """
+        try:
+            _logger.info("Fetching items from Bill.com (type: %s)", item_type or "all")
+
+            # Build query parameters
+            params = {}
+            if item_type:
+                params["type"] = item_type
+
+            # Make API request - GET /v3/classifications/items
+            result = self._make_request(
+                "classifications/items", method="GET", params=params
+            )
+
+            if result and isinstance(result, list):
+                _logger.info("Retrieved %d items from Bill.com", len(result))
+                return result
+            elif result and isinstance(result, dict) and "items" in result:
+                # Some APIs return {items: [...]}
+                items = result.get("items", [])
+                _logger.info("Retrieved %d items from Bill.com", len(items))
+                return items
+            else:
+                _logger.warning(
+                    "Unexpected response format from Bill.com items API: %s", result
+                )
+                return []
+
+        except Exception as e:
+            _logger.error("Error fetching items from Bill.com: %s", str(e))
+            raise
 
     @api.model
     def full_sync(self):

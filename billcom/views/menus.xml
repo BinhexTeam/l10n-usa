@@ -140,19 +140,38 @@
     />
 
         <!-- Menu Item -->
-    <menuitem id="menu_billcom_webhook_log"
-              name="Webhook Logs"
-              parent="menu_billcom_monitoring"
-              action="action_billcom_webhook_log"
-              sequence="60"/>
+    <menuitem
+        id="menu_billcom_webhook_log"
+        name="Webhook Logs"
+        parent="menu_billcom_monitoring"
+        action="action_billcom_webhook_log"
+        sequence="60"
+    />
 
       <!-- Menu Item -->
+      <menuitem
+        id="menu_billcom_account_accountant"
+        name="Accountant"
+        parent="menu_billcom_configuration"
+        sequence="20"
+    />
+
     <menuitem
         id="menu_billcom_funding_account"
-        name="Funding Accounts"
-        parent="menu_billcom_configuration"
+        name="Banks Accounts"
+        parent="menu_billcom_account_accountant"
         action="action_billcom_funding_account"
-        sequence="30"/>
+        sequence="30"
+    />
+
+        <!-- Menu Item -->
+    <menuitem
+        id="menu_billcom_item"
+        name="Items / Taxes"
+        parent="menu_billcom_account_accountant"
+        action="action_billcom_item"
+        sequence="40"
+    />
 
     <!-- Dashboard Menu -->
     <menuitem

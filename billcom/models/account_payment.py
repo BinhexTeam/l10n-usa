@@ -162,11 +162,9 @@ class AccountPayment(models.Model):
         # WALLET type requires processDate
         # processDate format "2025-12-31"
         if funding_type == "WALLET":
-            process_date = (
-                self.billcom_process_date.isoformat()
-                if self.billcom_process_date
-                else fields.Date.today().isoformat()
-            )
+            # Use Odoo's date string conversion to ensure "YYYY-MM-DD" format
+            date_obj = self.billcom_process_date or fields.Date.today()
+            process_date = fields.Date.to_string(date_obj)
         else:
             # Optional for other types - if not set, uses next available payment date
             process_date = None

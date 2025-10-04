@@ -22,3 +22,5 @@ access_billcom_webhook_log_user,billcom.webhook.log user,model_billcom_webhook_l
 access_billcom_webhook_log_manager,billcom.webhook.log manager,model_billcom_webhook_log,account.group_account_manager,1,1,1,1
 access_billcom_document_user,billcom.document user,model_billcom_document,account.group_account_invoice,1,1,1,0
 access_billcom_document_manager,billcom.document manager,model_billcom_document,account.group_account_manager,1,1,1,1
+access_billcom_item_user,billcom.item user,model_billcom_item,account.group_account_invoice,1,1,1,0
+access_billcom_item_manager,billcom.item manager,model_billcom_item,account.group_account_manager,1,1,1,1

@@ -400,31 +400,67 @@ class BillcomConfig(models.Model):
             raise UserError(_("Failed to initiate MFA setup: %s") % str(e))
 
     def button_sync_primary_data(self):
-        """Synchronize primary data from Bill.com (funding accounts, etc.)"""
+        """Synchronize primary data from Bill.com (funding accounts, taxes/items, etc.)"""
         self.ensure_one()
 
         try:
             _logger.info("Starting sync of primary data from Bill.com")
 
-            # Sync funding accounts
+            # Sync funding accounts from Bill.com
+            _logger.info("Syncing funding accounts from Bill.com...")
             funding_account_model = self.env["billcom.funding.account"]
-            result = funding_account_model.sync_funding_accounts_from_billcom()
+            funding_result = funding_account_model.sync_funding_accounts_from_billcom()
 
-            synced_count = result.get("synced", 0)
-            total_count = result.get("total", 0)
+            funding_synced = funding_result.get("synced", 0)
+            funding_total = funding_result.get("total", 0)
 
-            message = _("Successfully synchronized %d of %d funding accounts") % (
-                synced_count,
-                total_count,
+            # Import items from Bill.com (all types)
+            _logger.info("Importing items from Bill.com...")
+            item_model = self.env["billcom.item"]
+            import_result = item_model.sync_items_from_billcom()
+
+            items_created = import_result.get("created", 0)
+            items_updated = import_result.get("updated", 0)
+            items_errors = import_result.get("errors", 0)
+            items_total = import_result.get("total", 0)
+
+            # Sync Odoo taxes to Bill.com as items (SALES_TAX type)
+            _logger.info("Syncing Odoo taxes to Bill.com as items...")
+            tax_result = item_model.sync_from_odoo_taxes()
+
+            tax_synced = tax_result.get("synced", 0)
+            tax_total = tax_result.get("total", 0)
+            tax_errors = tax_result.get("errors", 0)
+
+            # Build summary message
+            message_parts = []
+            message_parts.append(
+                _("✓ Funding Accounts: %d of %d synchronized")
+                % (funding_synced, funding_total)
             )
+            message_parts.append(
+                _("✓ Items from Bill.com: %d created, %d updated (total: %d)")
+                % (items_created, items_updated, items_total)
+            )
+            if items_errors > 0:
+                message_parts.append(_("⚠ Items Import Errors: %d") % items_errors)
+            message_parts.append(
+                _("✓ Tax Items to Bill.com: %d of %d synchronized")
+                % (tax_synced, tax_total)
+            )
+            if tax_errors > 0:
+                message_parts.append(_("⚠ Tax Export Errors: %d") % tax_errors)
+
+            message = "\n".join(message_parts)
+            has_errors = items_errors > 0 or tax_errors > 0
 
             return {
                 "type": "ir.actions.client",
                 "tag": "display_notification",
                 "params": {
-                    "title": _("Sync Complete"),
+                    "title": _("Primary Data Sync Complete"),
                     "message": message,
-                    "type": "success",
+                    "type": "success" if not has_errors else "warning",
                     "sticky": False,
                 },
             }
@@ -434,27 +470,27 @@ class BillcomConfig(models.Model):
             _logger.error("Primary data sync failed: %s", error_msg)
             raise UserError(_("Primary data sync failed: %s") % error_msg)
 
-    def sync_primary_data(self):
-        """Sync primary data: partners, funding accounts"""
-        self.ensure_one()
+    # def sync_primary_data(self):
+    #     """Sync primary data: partners, funding accounts"""
+    #     self.ensure_one()
 
-        # Sync funding accounts
-        result = (
-            self.env["billcom.funding.account"]
-            .sudo()
-            .sync_funding_accounts_from_billcom()
-        )
+    #     # Sync funding accounts
+    #     result = (
+    #         self.env["billcom.funding.account"]
+    #         .sudo()
+    #         .sync_funding_accounts_from_billcom()
+    #     )
 
-        return {
-            "type": "ir.actions.client",
-            "tag": "display_notification",
-            "params": {
-                "title": "Funding Accounts Synced",
-                "message": f"Created: {result['created']}, Updated: {result['updated']}, Errors: {result['errors']}",
-                "type": "success" if result["errors"] == 0 else "warning",
-                "sticky": False,
-            },
-        }
+    #     return {
+    #         "type": "ir.actions.client",
+    #         "tag": "display_notification",
+    #         "params": {
+    #             "title": "Funding Accounts Synced",
+    #             "message": f"Created: {result['created']}, Updated: {result['updated']}, Errors: {result['errors']}",
+    #             "type": "success" if result["errors"] == 0 else "warning",
+    #             "sticky": False,
+    #         },
+    #     }
 
     @api.model
     def get_config(self):
