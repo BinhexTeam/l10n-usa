@@ -39,7 +39,7 @@ class AccountMove(models.Model):
         for line in self.invoice_line_ids:
             line_data = {
                 "description": line.name or "",
-                "amount": line.price_subtotal,
+                "amount": line.price_total,  # Tax included in amount
             }
 
             # Add tax items if line has taxes
