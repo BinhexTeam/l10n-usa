@@ -85,7 +85,12 @@ class BillcomWebhookLog(models.Model):
 
     @api.model
     def log_webhook(
-        self, event_type, entity_id, webhook_data=None, signature_valid=False
+        self,
+        event_type,
+        entity_id,
+        webhook_data=None,
+        signature_valid=False,
+        idempotency_key=None,
     ):
         """Log a webhook event
 
@@ -94,11 +99,14 @@ class BillcomWebhookLog(models.Model):
             entity_id (str): Bill.com entity ID
             webhook_data (str): Full JSON payload
             signature_valid (bool): Whether signature was valid
+            idempotency_key (str): Unique key for idempotency (uses eventId if available)
 
         Returns:
             billcom.webhook.log: Created log record
         """
-        idempotency_key = f"{event_type}:{entity_id}"
+        # Use provided idempotency_key or generate from event_type:entity_id
+        if not idempotency_key:
+            idempotency_key = f"{event_type}:{entity_id}"
 
         # Check for duplicate
         if self.check_duplicate(idempotency_key):

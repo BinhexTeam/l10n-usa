@@ -564,6 +564,7 @@ class BillComController(http.Controller):
                 entity_id=entity_id,
                 webhook_data=json.dumps(data),
                 signature_valid=signature_valid,
+                idempotency_key=idempotency_key,
             )
 
             if not webhook_log:
