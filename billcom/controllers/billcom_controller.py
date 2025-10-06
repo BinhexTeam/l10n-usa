@@ -142,9 +142,28 @@ class BillComController(http.Controller):
                 _logger.info("Restored bill %s in Odoo", entity_id)
 
         else:
-            # For created/updated events, sync from Bill.com
-            request.env["account.move"].sudo().sync_from_billcom(entity_id)
-            _logger.info("Synced bill %s from Bill.com", entity_id)
+            # For created/updated events, fetch full bill data and process
+            # Webhooks only contain partial data, we need full bill with line items
+            service = request.env["billcom.service"].sudo()
+            try:
+                # Fetch complete bill data from API
+                full_bill_data = service._make_request(f"bills/{entity_id}", method="GET")
+
+                if full_bill_data and full_bill_data.get("id"):
+                    # Create a queue item object to match the wizard processing signature
+                    queue_item = type('obj', (object,), {
+                        'entity_type': 'BILL',
+                        'entity_id': entity_id,
+                        'billcom_data': full_bill_data
+                    })()
+
+                    # Use the same processing method as the wizard for consistency
+                    service._process_bill_from_billcom(queue_item, full_bill_data)
+                    _logger.info("Processed bill %s from Bill.com webhook", entity_id)
+                else:
+                    _logger.error("Could not fetch full bill data for %s", entity_id)
+            except Exception as e:
+                _logger.error("Error processing bill webhook %s: %s", entity_id, str(e))
 
     def _handle_vendor_webhook(self, event_type, entity_id, entity_data, config):
         """Handle vendor-related webhook events

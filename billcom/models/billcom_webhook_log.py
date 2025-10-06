@@ -108,12 +108,8 @@ class BillcomWebhookLog(models.Model):
         if not idempotency_key:
             idempotency_key = f"{event_type}:{entity_id}"
 
-        # Check for duplicate
-        if self.check_duplicate(idempotency_key):
-            _logger.warning(
-                "Duplicate webhook detected: %s (already processed)", idempotency_key
-            )
-            return False
+        # Note: Duplicate check is done in the controller before calling this method
+        # No need to check again here to avoid double verification
 
         return self.create(
             {
