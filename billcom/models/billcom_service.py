@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import timedelta
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
@@ -2029,7 +2030,9 @@ class BillcomService(models.AbstractModel):
 
         # Map Bill.com status to Odoo state and apply if needed
         billcom_payment_status = billcom_data.get("paymentStatus", "UNDEFINED")
-        target_state = self._map_billcom_bill_status_to_odoo_state(billcom_payment_status)
+        target_state = self._map_billcom_bill_status_to_odoo_state(
+            billcom_payment_status
+        )
 
         if target_state == "posted" and move.state == "draft":
             # Post the bill if Bill.com status requires it
@@ -2302,7 +2305,9 @@ class BillcomService(models.AbstractModel):
 
         # Map Bill.com payment status to Odoo state and apply if needed
         billcom_payment_status = billcom_data.get("paymentStatus", "UNDEFINED")
-        target_state = self._map_billcom_payment_status_to_odoo_state(billcom_payment_status)
+        target_state = self._map_billcom_payment_status_to_odoo_state(
+            billcom_payment_status
+        )
 
         if target_state == "posted" and payment.state == "draft":
             # Post the payment if Bill.com status requires it
@@ -2797,6 +2802,167 @@ class BillcomService(models.AbstractModel):
             raise UserError(
                 _("Error syncing %ss from Bill.com: %s") % (partner_type, str(e))
             )
+
+    @api.model
+    def sync_bills_from_billcom(self):
+        """Sync bills from Bill.com to Odoo (bulk sync for cron backup)
+
+        Returns:
+            int: Number of bills synced
+        """
+        try:
+            config = self._get_config()
+        except UserError as e:
+            _logger.warning(str(e))
+            return 0
+
+        if not config.sync_bills:
+            _logger.info("Bill synchronization is disabled")
+            return 0
+
+        try:
+            # Get bills from Bill.com API with recent filter (last 30 days)
+            from_date = (fields.Date.today() - timedelta(days=30)).isoformat()
+            result = self._make_request(f"bills?updatedTime={from_date}", method="GET")
+            bills = result.get("data", [])
+            synced_count = 0
+
+            _logger.info(f"Syncing {len(bills)} bills from Bill.com")
+
+            for bill_data in bills:
+                try:
+                    # Create queue item and process
+                    queue_item = type(
+                        "obj",
+                        (object,),
+                        {
+                            "entity_type": "BILL",
+                            "entity_id": bill_data["id"],
+                            "billcom_data": bill_data,
+                        },
+                    )()
+
+                    self._process_bill_from_billcom(queue_item, bill_data)
+                    synced_count += 1
+                except Exception as e:
+                    _logger.error(f"Error syncing bill {bill_data.get('id')}: {e}")
+
+            _logger.info(f"Successfully synced {synced_count} bills from Bill.com")
+            return synced_count
+
+        except Exception as e:
+            _logger.error(f"Error in bills sync from Bill.com: {e}")
+            return 0
+
+    @api.model
+    def sync_invoices_from_billcom(self):
+        """Sync invoices from Bill.com to Odoo (bulk sync for cron backup)
+
+        Returns:
+            int: Number of invoices synced
+        """
+        try:
+            config = self._get_config()
+        except UserError as e:
+            _logger.warning(str(e))
+            return 0
+
+        if not config.sync_invoices:
+            _logger.info("Invoice synchronization is disabled")
+            return 0
+
+        try:
+            # Get invoices from Bill.com API with recent filter (last 30 days)
+            from_date = (fields.Date.today() - timedelta(days=30)).isoformat()
+            result = self._make_request(
+                f"invoices?updatedTime={from_date}", method="GET"
+            )
+            invoices = result.get("data", [])
+            synced_count = 0
+
+            _logger.info(f"Syncing {len(invoices)} invoices from Bill.com")
+
+            for invoice_data in invoices:
+                try:
+                    # Create queue item and process
+                    queue_item = type(
+                        "obj",
+                        (object,),
+                        {
+                            "entity_type": "INVOICE",
+                            "entity_id": invoice_data["id"],
+                            "billcom_data": invoice_data,
+                        },
+                    )()
+
+                    self._process_invoice_from_billcom(queue_item, invoice_data)
+                    synced_count += 1
+                except Exception as e:
+                    _logger.error(
+                        f"Error syncing invoice {invoice_data.get('id')}: {e}"
+                    )
+
+            _logger.info(f"Successfully synced {synced_count} invoices from Bill.com")
+            return synced_count
+
+        except Exception as e:
+            _logger.error(f"Error in invoices sync from Bill.com: {e}")
+            return 0
+
+    @api.model
+    def sync_payments_from_billcom(self):
+        """Sync payments from Bill.com to Odoo (bulk sync for cron backup)
+
+        Returns:
+            int: Number of payments synced
+        """
+        try:
+            config = self._get_config()
+        except UserError as e:
+            _logger.warning(str(e))
+            return 0
+
+        if not config.sync_payments:
+            _logger.info("Payment synchronization is disabled")
+            return 0
+
+        try:
+            # Get payments from Bill.com API with recent filter (last 30 days)
+            from_date = (fields.Date.today() - timedelta(days=30)).isoformat()
+            result = self._make_request(
+                f"payments?updatedTime={from_date}", method="GET"
+            )
+            payments = result.get("data", [])
+            synced_count = 0
+
+            _logger.info(f"Syncing {len(payments)} payments from Bill.com")
+
+            for payment_data in payments:
+                try:
+                    # Create queue item and process
+                    queue_item = type(
+                        "obj",
+                        (object,),
+                        {
+                            "entity_type": "PAYMENT",
+                            "entity_id": payment_data["id"],
+                            "billcom_data": payment_data,
+                        },
+                    )()
+
+                    self._process_payment_from_billcom(queue_item, payment_data)
+                    synced_count += 1
+                except Exception as e:
+                    _logger.error(
+                        f"Error syncing payment {payment_data.get('id')}: {e}"
+                    )
+
+            _logger.info(f"Successfully synced {synced_count} payments from Bill.com")
+            return synced_count
+
+        except Exception as e:
+            _logger.error(f"Error in payments sync from Bill.com: {e}")
+            return 0
 
     @api.model
     def sync_partners_cron(self):
