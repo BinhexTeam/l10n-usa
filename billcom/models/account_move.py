@@ -453,6 +453,9 @@ class AccountMove(models.Model):
             _logger.error("No Bill.com ID provided for sync")
             return False
 
+        move = False
+        move_type = False
+
         try:
             # Search for existing document with this Bill.com ID
             move = self.search(
@@ -570,6 +573,35 @@ class AccountMove(models.Model):
                 move = self.with_context(skip_billcom_sync=True).create(vals)
                 _logger.info("Created new %s in Odoo: %s", endpoint, move.name)
                 action = "created"
+
+            # Apply status mapping from Bill.com to Odoo state
+            if endpoint == "bills":
+                billcom_payment_status = document_data.get("paymentStatus", "UNDEFINED")
+                target_state = service._map_billcom_bill_status_to_odoo_state(
+                    billcom_payment_status
+                )
+            else:  # invoices
+                billcom_status = document_data.get("status", "UNDEFINED")
+                target_state = service._map_billcom_invoice_status_to_odoo_state(
+                    billcom_status
+                )
+
+            if target_state == "posted" and move.state == "draft":
+                # Post the move if Bill.com status requires it
+                try:
+                    move.with_context(skip_billcom_sync=True).action_post()
+                    _logger.info(
+                        "Posted %s %s based on Bill.com status (webhook sync)",
+                        endpoint,
+                        move.name,
+                    )
+                except Exception as e:
+                    _logger.warning(
+                        "Could not post %s %s from Bill.com status (webhook): %s",
+                        endpoint,
+                        move.name,
+                        e,
+                    )
 
             # Post success message to chatter
             doc_type = "Bill" if endpoint == "bills" else "Invoice"

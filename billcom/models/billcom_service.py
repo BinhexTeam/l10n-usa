@@ -1515,6 +1515,72 @@ class BillcomService(models.AbstractModel):
         }
 
     @api.model
+    def _map_billcom_bill_status_to_odoo_state(self, paymentStatus):
+        """Map Bill.com bill paymentStatus to Odoo move state
+
+        Bill.com Bill paymentStatus:
+        - UNDEFINED: Status not defined → draft
+        - APPROVING: Being approved → posted
+        - SCHEDULED: Payment scheduled → posted
+        - PAID: Fully paid → posted
+        - CANCELLED: Cancelled → posted (keep posted, just mark as paid)
+        - VOID: Voided → posted
+        - ESCHEATED: Escheated → posted
+
+        Odoo States:
+        - draft: Not confirmed
+        - posted: Confirmed and accounting entries created
+        """
+        if paymentStatus == "UNDEFINED":
+            return "draft"
+        else:
+            # All other statuses mean the bill is confirmed
+            return "posted"
+
+    @api.model
+    def _map_billcom_invoice_status_to_odoo_state(self, status):
+        """Map Bill.com invoice status to Odoo move state
+
+        Bill.com Invoice Statuses (similar to bills):
+        - OPEN: Invoice sent, awaiting payment
+        - UNDEFINED: Status not defined → draft
+        - PAID_IN_FULL: Fully paid → posted
+        - PARTIAL_PAYMENT: Partially paid → posted
+        - SCHEDULED: Payment scheduled → posted
+
+        Odoo States:
+        - draft: Not confirmed
+        - posted: Confirmed and accounting entries created
+        """
+        if status in ["OPEN", "UNDEFINED"]:
+            return "draft"
+        else:
+            return "posted"
+
+    @api.model
+    def _map_billcom_payment_status_to_odoo_state(self, paymentStatus):
+        """Map Bill.com payment paymentStatus to Odoo payment state
+
+        Bill.com Payment paymentStatus:
+        - UNDEFINED: Not defined → draft
+        - UNPAID: Not paid yet → draft
+        - PAID: Paid → posted
+        - PARTIALLY_PAID: Partially paid → posted
+        - SCHEDULED: Scheduled → posted
+        - IN_PROCESS: Being processed → posted
+
+        Odoo Payment States:
+        - draft: Not confirmed
+        - posted: Confirmed
+        - cancel: Cancelled (not used for these statuses)
+        """
+        if paymentStatus in ["UNDEFINED", "UNPAID"]:
+            return "draft"
+        else:
+            # PAID, PARTIALLY_PAID, SCHEDULED, IN_PROCESS → posted
+            return "posted"
+
+    @api.model
     def process_queue_item_from_billcom(self, queue_item):
         """Process a queue item with data from BILL (BILL → Odoo)
 
@@ -1961,6 +2027,22 @@ class BillcomService(models.AbstractModel):
                 f"Created bill {move.name} from BILL (Invoice #: {invoice_number})"
             )
 
+        # Map Bill.com status to Odoo state and apply if needed
+        billcom_payment_status = billcom_data.get("paymentStatus", "UNDEFINED")
+        target_state = self._map_billcom_bill_status_to_odoo_state(billcom_payment_status)
+
+        if target_state == "posted" and move.state == "draft":
+            # Post the bill if Bill.com status requires it
+            try:
+                move.with_context(skip_billcom_sync=True).action_post()
+                _logger.info(
+                    f"Posted bill {move.name} based on Bill.com status: {billcom_payment_status}"
+                )
+            except Exception as e:
+                _logger.warning(
+                    f"Could not post bill {move.name} from Bill.com status {billcom_payment_status}: {e}"
+                )
+
         queue_item.record_id = move.id
         return True
 
@@ -2132,6 +2214,22 @@ class BillcomService(models.AbstractModel):
                 f"Created invoice {move.name} from BILL (Invoice #: {invoice_number})"
             )
 
+        # Map Bill.com status to Odoo state and apply if needed
+        billcom_status = billcom_data.get("status", "UNDEFINED")
+        target_state = self._map_billcom_invoice_status_to_odoo_state(billcom_status)
+
+        if target_state == "posted" and move.state == "draft":
+            # Post the invoice if Bill.com status requires it
+            try:
+                move.with_context(skip_billcom_sync=True).action_post()
+                _logger.info(
+                    f"Posted invoice {move.name} based on Bill.com status: {billcom_status}"
+                )
+            except Exception as e:
+                _logger.warning(
+                    f"Could not post invoice {move.name} from Bill.com status {billcom_status}: {e}"
+                )
+
         queue_item.record_id = move.id
         return True
 
@@ -2201,6 +2299,22 @@ class BillcomService(models.AbstractModel):
                 .create(vals)
             )
             _logger.info(f"Created payment {payment.name} from BILL")
+
+        # Map Bill.com payment status to Odoo state and apply if needed
+        billcom_payment_status = billcom_data.get("paymentStatus", "UNDEFINED")
+        target_state = self._map_billcom_payment_status_to_odoo_state(billcom_payment_status)
+
+        if target_state == "posted" and payment.state == "draft":
+            # Post the payment if Bill.com status requires it
+            try:
+                payment.with_context(skip_billcom_sync=True).action_post()
+                _logger.info(
+                    f"Posted payment {payment.name} based on Bill.com status: {billcom_payment_status}"
+                )
+            except Exception as e:
+                _logger.warning(
+                    f"Could not post payment {payment.name} from Bill.com status {billcom_payment_status}: {e}"
+                )
 
         queue_item.record_id = payment.id
         return True

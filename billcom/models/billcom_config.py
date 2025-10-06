@@ -85,7 +85,7 @@ class BillcomConfig(models.Model):
     # Sync Configuration
     sync_invoices = fields.Boolean(
         string="Sync Customer Invoices",
-        default=False,
+        default=True,
         help="Enable synchronization of customer invoices to Bill.com",
     )
     sync_bills = fields.Boolean(
@@ -95,7 +95,7 @@ class BillcomConfig(models.Model):
     )
     sync_customers = fields.Boolean(
         string="Sync Customers",
-        default=False,
+        default=True,
         help="Enable synchronization of customers to Bill.com",
     )
     sync_vendors = fields.Boolean(

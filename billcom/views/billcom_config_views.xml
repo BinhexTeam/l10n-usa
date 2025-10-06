@@ -29,19 +29,20 @@
                     />
                     <!-- Sync Buttons -->
                     <button
+                        name="button_sync_primary_data"
+                        type="object"
+                        string="Synchronize Master Data"
+                        class="btn-secondary"
+                        attrs="{'invisible': [('state', '!=', 'connected')]}"
+                    />
+                    <button
                         name="%(action_billcom_sync_wizard)d"
                         type="action"
                         string="Sync Wizard"
                         class="btn-success"
                         attrs="{'invisible': [('state', '!=', 'connected')]}"
                     />
-                    <button
-                        name="button_sync_primary_data"
-                        type="object"
-                        string="Sync Primary Data"
-                        class="btn-secondary"
-                        attrs="{'invisible': [('state', '!=', 'connected')]}"
-                    />
+
                 </header>
                 <sheet>
                     <widget

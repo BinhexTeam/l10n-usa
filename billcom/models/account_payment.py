@@ -476,6 +476,8 @@ class AccountPayment(models.Model):
                         "last_sync_date": fields.Datetime.now(),
                     }
                 )
+                # Cancel payment
+                self.action_cancel()
 
                 return {
                     "type": "ir.actions.client",
@@ -727,6 +729,30 @@ class AccountPayment(models.Model):
                     ),
                 }
             )
+
+            # Apply status mapping from Bill.com to Odoo state
+            billcom_payment_status = payment_data.get("paymentStatus", "UNDEFINED")
+            service = self.env["billcom.service"].sudo()
+            target_state = service._map_billcom_payment_status_to_odoo_state(
+                billcom_payment_status
+            )
+
+            if target_state == "posted" and payment.state == "draft":
+                # Post the payment if Bill.com status requires it
+                try:
+                    payment.with_context(skip_billcom_sync=True).action_post()
+                    _logger.info(
+                        "Posted payment %s based on Bill.com status: %s (webhook)",
+                        payment.name,
+                        billcom_payment_status,
+                    )
+                except Exception as e:
+                    _logger.warning(
+                        "Could not post payment %s from Bill.com status %s (webhook): %s",
+                        payment.name,
+                        billcom_payment_status,
+                        e,
+                    )
 
             # Log status change if it occurred
             if old_status != new_status:
