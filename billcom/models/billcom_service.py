@@ -1787,7 +1787,7 @@ class BillcomService(models.AbstractModel):
         """
         bank_account_data = payment_info.get("bankAccount", {})
         routing_number = bank_account_data.get("routingNumber")
-        account_number = bank_account_data.get("accountNumber", "")
+        account_number = bank_account_data.get("accountNumber", False)
 
         # Bill.com masks account numbers, so we can only update if we have full number
         if not routing_number:
@@ -1834,14 +1834,9 @@ class BillcomService(models.AbstractModel):
         }
 
         # Only set account number if not masked (doesn't contain *)
-        is_masked = "*" in account_number
-        if not is_masked and account_number:
+        if account_number:
             bank_vals["acc_number"] = account_number
-        elif is_masked and existing_bank_account and existing_bank_account.acc_number:
-            # Keep existing full account number if Bill.com returns masked version
-            _logger.info(
-                f"Bill.com returned masked account number for {partner.name}, keeping existing full number"
-            )
+
 
         if existing_bank_account:
             # Update existing bank account
@@ -1850,7 +1845,7 @@ class BillcomService(models.AbstractModel):
                 f"Updated bank account for {partner.name} "
                 f"(type: {payment_info.get('payByType')}, routing: {routing_number})"
             )
-        elif not is_masked and account_number:
+        elif account_number:
             # Only create new bank account if we have full account number
             self.env["res.partner.bank"].create(bank_vals)
             _logger.info(

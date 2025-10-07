@@ -115,6 +115,41 @@ class BillcomPartnerMatchingLine(models.TransientModel):
                     }
                 )
 
+                # Fetch and sync complete vendor data from Bill.com (including bank account)
+                service = self.env["billcom.service"].sudo()
+                partner_type = (
+                    "vendor"
+                    if line.odoo_partner_id.supplier_rank > 0
+                    else "customer"
+                )
+                endpoint = (
+                    f"vendors/{line.billcom_partner_id}"
+                    if partner_type == "vendor"
+                    else f"customers/{line.billcom_partner_id}"
+                )
+
+                try:
+                    billcom_data = service._make_request(endpoint, method="GET")
+                    _logger.info(
+                        f"Fetched complete {partner_type} data from Bill.com for {line.odoo_partner_id.name}"
+                    )
+
+                    # Sync bank account if paymentInformation exists
+                    payment_info = billcom_data.get("paymentInformation", {})
+                    if payment_info and payment_info.get("bankAccount"):
+                        service._sync_partner_bank_account(
+                            line.odoo_partner_id, payment_info
+                        )
+                        _logger.info(
+                            f"Synced bank account from Bill.com for {line.odoo_partner_id.name}"
+                        )
+
+                except Exception as e:
+                    _logger.warning(
+                        f"Could not fetch/sync complete {partner_type} data from Bill.com: {e}"
+                    )
+                    # Don't fail the linking process if bank sync fails
+
                 line.write({"state": "linked"})
 
                 # Log success
