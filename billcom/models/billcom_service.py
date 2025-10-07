@@ -86,11 +86,28 @@ class BillcomService(models.AbstractModel):
 
             if existing_id:
                 # Update existing partner
+                if partner.country_id.code != "US" and partner_data.get("paymentInformation", False):
+                    partner_data["paymentInformation"].update({
+                        "paymentPurpose": {
+                            # "text": "",
+                            "code": {
+                                "name": partner.billcom_payment_purpose_id.code,
+                                "value": partner.billcom_payment_purpose_id.description
+                            }
+                        }
+                    })
+
+                _logger.info(
+                    "Updating partner_data %s with paymentPurpose in Bill.com",
+                    partner_data
+                )
+
                 _logger.info(
                     "Updating existing %s with ID %s in Bill.com",
                     partner_type,
                     existing_id,
                 )
+
                 result = self._make_request(
                     f"{endpoint}/{existing_id}", method="PATCH", data=partner_data
                 )

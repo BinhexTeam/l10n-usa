@@ -9,7 +9,7 @@
             <!-- Add invisible fields for attrs usage -->
             <xpath expr="//field[@name='vat']" position="after">
                 <field name="customer_rank" invisible="1" />
-                <field name="supplier_rank" invisible="1" />
+                <field name="supplier_rank" invisible="0" />
             </xpath>
 
 
@@ -21,6 +21,21 @@
                     attrs="{'invisible': [('customer_rank', '=', 0), ('supplier_rank', '=', 0)]}"
                 >
                     <group>
+                        <field
+                            name="billcom_res_currency_id"
+                            options="{'no_create': True}"
+                            groups="account.group_account_invoice"
+                        />
+                        <field
+                            name="billcom_payment_purpose_id"
+                            options="{'no_create': True}"
+                            groups="account.group_account_invoice"
+                            attrs="{'invisible': [('country_id', '=', False)]}"
+                        />
+                        <field name="billcom_sync_manual" widget="boolean_toggle"/>
+                    </group>
+                    <group>
+
                         <group
                             string="Vendor"
                             groups="account.group_account_invoice"
@@ -29,8 +44,7 @@
                             <field name="is_sync_to_billcom" />
                             <field
                                 name="billcom_id"
-                                readonly="1"
-                                attrs="{'invisible': [('billcom_id', '=', False)]}"
+                                attrs="{'readonly': [('billcom_sync_manual', '=', False)], 'invisible': [('billcom_id', '=', False),('billcom_sync_manual', '=', False)]}"
                             />
                             <field
                                 name="last_sync_date"
@@ -69,7 +83,7 @@
                             <field
                                 name="billcom_id"
                                 readonly="1"
-                                attrs="{'invisible': [('billcom_id', '=', False)]}"
+                                attrs="{'invisible': [('billcom_id', '=', False),('billcom_sync_manual', '=', False)]}"
                             />
                             <field
                                 name="last_sync_date"

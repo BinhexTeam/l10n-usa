@@ -205,5 +205,12 @@
         action="action_billcom_item"
         sequence="40"
     />
+    <menuitem
+        id="menu_billcom_payment_purpose"
+        name="International Payment Purposes"
+        parent="menu_billcom_account_accountant"
+        action="action_billcom_payment_purpose"
+        sequence="50"
+    />
 
 </odoo>

@@ -28,3 +28,4 @@ access_billcom_partner_matching_wizard_user,billcom.partner.matching.wizard user
 access_billcom_partner_matching_wizard_manager,billcom.partner.matching.wizard manager,model_billcom_partner_matching_wizard,account.group_account_manager,1,1,1,1
 access_billcom_partner_matching_line_user,billcom.partner.matching.line user,model_billcom_partner_matching_line,account.group_account_invoice,1,1,1,1
 access_billcom_partner_matching_line_manager,billcom.partner.matching.line manager,model_billcom_partner_matching_line,account.group_account_manager,1,1,1,1
+access_billcom_payment_purpose_manager,billcom_payment_purpose_manager,model_billcom_payment_purpose,,1,1,1,1
