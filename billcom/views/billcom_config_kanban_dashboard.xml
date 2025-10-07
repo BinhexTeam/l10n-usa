@@ -5,7 +5,7 @@
         <field name="name">billcom.config.kanban.dashboard</field>
         <field name="model">billcom.config</field>
         <field name="arch" type="xml">
-            <kanban class="o_kanban_dashboard" create="false">
+            <kanban class="o_kanban_dashboard o_billcom_kanban" create="false">
                 <field name="name" />
                 <field name="state" />
                 <field name="environment" />
@@ -19,7 +19,7 @@
                     <t t-name="kanban-box">
                         <div
                             t-attf-class="#{kanban_color(record.color.raw_value)} oe_kanban_global_click o_kanban_dashboard_card"
-                            style="width: 1200px; max-width: 98vw; margin: 0 auto; box-shadow: 0 8px 32px rgba(255,90,10,0.15); border: 1px solid rgba(255,90,10,0.1); border-radius: 12px;"
+                            style="max-width: 98vw; margin: 0 auto; box-shadow: 0 8px 32px rgba(255,90,10,0.15); border: 1px solid rgba(255,90,10,0.1); border-radius: 12px;"
                         >
                             <t
                                 t-set="dashboard"

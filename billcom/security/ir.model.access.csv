@@ -24,3 +24,7 @@ access_billcom_document_user,billcom.document user,model_billcom_document,accoun
 access_billcom_document_manager,billcom.document manager,model_billcom_document,account.group_account_manager,1,1,1,1
 access_billcom_item_user,billcom.item user,model_billcom_item,account.group_account_invoice,1,1,1,0
 access_billcom_item_manager,billcom.item manager,model_billcom_item,account.group_account_manager,1,1,1,1
+access_billcom_partner_matching_wizard_user,billcom.partner.matching.wizard user,model_billcom_partner_matching_wizard,account.group_account_invoice,1,1,1,1
+access_billcom_partner_matching_wizard_manager,billcom.partner.matching.wizard manager,model_billcom_partner_matching_wizard,account.group_account_manager,1,1,1,1
+access_billcom_partner_matching_line_user,billcom.partner.matching.line user,model_billcom_partner_matching_line,account.group_account_invoice,1,1,1,1
+access_billcom_partner_matching_line_manager,billcom.partner.matching.line manager,model_billcom_partner_matching_line,account.group_account_manager,1,1,1,1

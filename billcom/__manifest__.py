@@ -15,6 +15,11 @@
     "external_dependencies": {
         "python": ["requests", "PyJWT"],
     },
+    "assets": {
+        "web.assets_backend": [
+            "billcom/static/src/scss/billcom_dashboard.scss",
+        ],
+    },
     "data": [
         "data/ir_cron_data.xml",
         "security/billcom_security.xml",
@@ -33,9 +38,11 @@
         "views/billcom_logger_views.xml",
         "views/billcom_sync_queue_views.xml",
         "views/billcom_webhook_log_views.xml",
+        "views/res_bank_views.xml",
         "views/res_partner_bank_views.xml",
         "views/res_partner_views.xml",
         "wizards/billcom_mfa_wizard_views.xml",
+        "wizards/billcom_partner_matching_wizard_views.xml",
         "wizards/billcom_sync_wizard.xml",
         "views/menus.xml",
     ],

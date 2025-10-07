@@ -9,6 +9,17 @@
     />
 
 
+    <!-- Dashboard Menu -->
+    <menuitem
+        id="menu_billcom_dashboard"
+        name="Dashboard"
+        parent="menu_billcom_main"
+        action="action_billcom_dashboard"
+        sequence="1"
+        groups="account.group_account_manager"
+    />
+
+
     <!-- Reporting Menu -->
     <menuitem
         id="menu_billcom_reporting"
@@ -37,7 +48,7 @@
 
     <menuitem
         id="menu_billcom_config"
-        name="Bill.com Settings"
+        name="Settings"
         parent="menu_billcom_configuration"
         action="action_billcom_config"
         sequence="10"
@@ -47,7 +58,7 @@
     <menuitem
         id="menu_billcom_sync"
         name="Synchronization"
-        parent="menu_billcom_main"
+        parent="menu_billcom_configuration"
         sequence="10"
     />
 
@@ -60,68 +71,91 @@
     />
 
     <menuitem
+        id="menu_billcom_partner_matching"
+        name="Partner Matching"
+        parent="menu_billcom_sync"
+        action="action_billcom_partner_matching_wizard"
+        sequence="40"
+    />
+
+    <menuitem
         id="menu_billcom_sync_queue"
         name="Sync Queue"
         parent="menu_billcom_sync"
         action="action_billcom_sync_queue"
-        sequence="20"
+        sequence="50"
     />
 
     <!-- Bill.com Records Submenu -->
     <menuitem
-        id="menu_billcom_records"
-        name="From Bill.com"
+        id="menu_billcom_invoicing"
+        name="Invoicing"
         parent="menu_billcom_main"
         sequence="5"
+    />
+    <menuitem
+        id="menu_billcom_invoicing_vendors"
+        name="Vendors"
+        parent="menu_billcom_invoicing"
+        sequence="5"
+    />
+    <menuitem
+        id="menu_billcom_invoicing_customers"
+        name="Customers"
+        parent="menu_billcom_invoicing"
+        sequence="5"
+    />
+
+    <menuitem
+        id="menu_billcom_bills_from_billcom"
+        name="Bills"
+        parent="menu_billcom_invoicing_vendors"
+        action="action_window_bills_from_billcom"
+        sequence="10"
     />
 
     <menuitem
         id="menu_billcom_vendors_from_billcom"
         name="Vendors"
-        parent="menu_billcom_records"
+        parent="menu_billcom_invoicing_vendors"
         action="action_window_vendors_from_billcom"
+        sequence="20"
+    />
+
+    <menuitem
+        id="menu_billcom_payments_from_billcom"
+        name="Payments"
+        parent="menu_billcom_invoicing_vendors"
+        action="action_window_payments_from_billcom"
+        sequence="50"
+    />
+
+
+    <menuitem
+        id="menu_billcom_invoices_from_billcom"
+        name="Invoices"
+        parent="menu_billcom_invoicing_customers"
+        action="action_window_invoices_from_billcom"
         sequence="10"
     />
 
     <menuitem
         id="menu_billcom_customers_from_billcom"
         name="Customers"
-        parent="menu_billcom_records"
+        parent="menu_billcom_invoicing_customers"
         action="action_window_customers_from_billcom"
         sequence="20"
     />
 
-    <menuitem
-        id="menu_billcom_bills_from_billcom"
-        name="Bills"
-        parent="menu_billcom_records"
-        action="action_window_bills_from_billcom"
-        sequence="30"
-    />
-
-    <menuitem
-        id="menu_billcom_invoices_from_billcom"
-        name="Invoices"
-        parent="menu_billcom_records"
-        action="action_window_invoices_from_billcom"
-        sequence="40"
-    />
-
-    <menuitem
-        id="menu_billcom_payments_from_billcom"
-        name="Payments"
-        parent="menu_billcom_records"
-        action="action_window_payments_from_billcom"
-        sequence="50"
-    />
 
     <menuitem
         id="menu_billcom_documents"
         name="Documents"
-        parent="menu_billcom_records"
+        parent="menu_billcom_invoicing"
         action="action_billcom_document"
         sequence="60"
     />
+
 
     <!-- Monitoring Submenu -->
     <menuitem
@@ -164,7 +198,6 @@
         sequence="30"
     />
 
-        <!-- Menu Item -->
     <menuitem
         id="menu_billcom_item"
         name="Items / Taxes"
@@ -173,13 +206,4 @@
         sequence="40"
     />
 
-    <!-- Dashboard Menu -->
-    <menuitem
-        id="menu_billcom_dashboard"
-        name="Dashboard"
-        parent="menu_billcom_main"
-        action="action_billcom_dashboard"
-        sequence="1"
-        groups="account.group_account_manager"
-    />
 </odoo>

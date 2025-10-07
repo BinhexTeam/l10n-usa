@@ -562,7 +562,7 @@ class BillComController(http.Controller):
             webhook_log = webhook_log_model.log_webhook(
                 event_type=event_type,
                 entity_id=entity_id,
-                webhook_data=json.dumps(data)
+                webhook_data=json.dumps(data),
                 signature_valid=signature_valid,
                 idempotency_key=idempotency_key,
             )

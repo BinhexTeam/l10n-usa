@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import timedelta
 
 from odoo import _, api, fields, models
 from odoo.exceptions import UserError
@@ -22,7 +23,13 @@ class AccountPayment(models.Model):
         default="BANK_ACCOUNT",
         help="Type of funding account for Bill.com payment",
     )
-    billcom_process_date = fields.Date(string="Process Date")
+    billcom_process_date = fields.Date(
+        string="Process Date",
+        help="Date when Bill.com will process this payment (format: YYYY-MM-DD). "
+        "Required for WALLET and AP_CARD funding types. "
+        "For new vendor bank accounts, must be at least 2 business days from today.",
+    )
+    is_process_date_sync = fields.Boolean(compute="_compute_process_sync_date")
     billcom_pay_faster = fields.Boolean(
         string="Pay Faster",
         default=False,
@@ -74,6 +81,20 @@ class AccountPayment(models.Model):
         string="Funding Amount (USD)", readonly=True
     )
 
+    @api.depends("partner_bank_id.billcom_last_sync_date")
+    def _compute_process_sync_date(self):
+        # If add a new bank account for a vendor and pay them via BANK_ACCOUNT,
+        # Note: When you add a vendor bank account, BILL requires 2 business days to complete a one-time verification of the bank account. To pay such a vendor, you must set a processDate that is 2 business days from the current date.
+
+        for rec in self:
+            if self.partner_bank_id.billcom_last_sync_date:
+                diff = fields.Datetime.today() - self.partner_bank_id.billcom_last_sync_date
+                rec.is_process_date_sync = diff >= timedelta(days=1)
+            else:
+                rec.is_process_date_sync = True
+
+
+
     @api.depends("partner_id", "partner_id.country_id")
     def _compute_is_international_payment(self):
         """Determine if payment is international based on vendor country"""
@@ -85,6 +106,54 @@ class AccountPayment(models.Model):
                 )
             else:
                 payment.is_international_payment = False
+
+    def _calculate_business_days_ahead(self, days=2):
+        """Calculate a date N business days from today (excluding weekends)
+
+        Args:
+            days (int): Number of business days to add (default: 2)
+
+        Returns:
+            date: Date N business days from today
+
+        Note: This is a simple calculation that only excludes weekends.
+        For accurate business day calculation with holidays, consider using
+        a proper business day calendar library.
+        """
+        current_date = fields.Date.today()
+        business_days_added = 0
+
+        while business_days_added < days:
+            current_date += timedelta(days=1)
+            # Skip weekends (Saturday=5, Sunday=6)
+            if current_date.weekday() < 5:
+                business_days_added += 1
+
+        return current_date
+
+    def action_set_process_date_for_new_vendor(self):
+        """Set process date to 2 business days ahead for new vendor bank accounts
+
+        Use this action when paying a vendor for the first time with a bank account,
+        as Bill.com requires 2 business days for verification.
+        """
+        self.ensure_one()
+        min_process_date = self._calculate_business_days_ahead(days=2)
+        self.billcom_process_date = min_process_date
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Process Date Updated"),
+                "message": _(
+                    "Process date set to %s (2 business days ahead for new vendor verification)"
+                )
+                % min_process_date,
+                "type": "success",
+                "sticky": False,
+            },
+        }
 
     def _prepare_payment_data(self):
         """Prepare payment data for Bill.com API"""
@@ -159,15 +228,53 @@ class AccountPayment(models.Model):
             funding_account_data["id"] = funding_account_id
 
         # Determine process date
-        # WALLET type requires processDate
-        # processDate format "2025-12-31"
-        if funding_type == "WALLET":
-            # Use Odoo's date string conversion to ensure "YYYY-MM-DD" format
-            date_obj = self.billcom_process_date or fields.Date.today()
-            process_date = fields.Date.to_string(date_obj)
-        else:
-            # Optional for other types - if not set, uses next available payment date
-            process_date = None
+        # WALLET and AP_CARD types REQUIRE processDate
+        # BANK_ACCOUNT and CHECK: DO NOT send processDate (Bill.com sets it automatically)
+        # Format: "YYYY-MM-DD" (e.g., "2025-12-31")
+        #
+        # Important: Bill.com automatically calculates next available payment date
+        # considering bank verification times (2 business days for new accounts)
+
+        process_date = None
+        requires_process_date = funding_type in ["WALLET", "AP_CARD"]
+
+        # ONLY process date for WALLET and AP_CARD (required)
+        # For BANK_ACCOUNT and CHECK, let Bill.com set the date automatically
+        if requires_process_date or not self.is_process_date_sync:
+            # Use user-specified date or calculate default
+            if self.billcom_process_date:
+                date_obj = self.billcom_process_date
+            else:
+                # For WALLET/AP_CARD, default to today
+                # For new vendor bank accounts, should be +2 business days but we'll
+                # let Bill.com validate this (they return error if too soon)
+                date_obj = fields.Date.today()
+
+            # Convert to string format "YYYY-MM-DD"
+            # CRITICAL: Bill.com requires exact format "YYYY-MM-DD"
+            if isinstance(date_obj, str):
+                # Already a string, validate format
+                process_date = date_obj
+            elif hasattr(date_obj, "strftime"):
+                # Date/datetime object, convert to string
+                process_date = date_obj.strftime("%Y-%m-%d")
+            else:
+                # Use Odoo's date conversion
+                process_date = fields.Date.to_string(date_obj)
+
+            # Validate the format
+            if not process_date or not isinstance(process_date, str):
+                raise UserError(
+                    _(
+                        "Invalid process date format. Expected YYYY-MM-DD string, got: %s"
+                    )
+                    % str(process_date)
+                )
+
+            _logger.info(
+                f"Payment processDate set to '{process_date}' (type: {type(process_date).__name__}) "
+                f"(funding_type={funding_type}, required={requires_process_date})"
+            )
 
         # Determine if we should create a bill or pay an existing one
         # If there's a linked bill with Bill.com ID, we pay it
@@ -187,9 +294,19 @@ class AccountPayment(models.Model):
             },
         }
 
-        # Add processDate if set or required (WALLET type)
-        if process_date:
+        # Add processDate if set (CRITICAL: Must be string in YYYY-MM-DD format)
+        if process_date and isinstance(process_date, str) and len(process_date) == 10:
             payment_data["processDate"] = process_date
+            _logger.info(f"Adding processDate to payment payload: '{process_date}'")
+        elif requires_process_date:
+            # WALLET and AP_CARD REQUIRE processDate
+            raise UserError(
+                _(
+                    "Process date is required for %s funding type but was not set correctly. "
+                    "Please set a valid process date (YYYY-MM-DD format)."
+                )
+                % funding_type
+            )
 
         # Add bill ID if available (only when createBill is False)
         if bill_id:
@@ -217,6 +334,17 @@ class AccountPayment(models.Model):
                 payment_data["internationalOptions"][
                     "wireInstructions"
                 ] = self.partner_id.bank_ids[0].bank_id.bic
+
+        # Final validation and logging
+        _logger.info("=" * 80)
+        _logger.info("FINAL PAYMENT DATA TO BILL.COM:")
+        _logger.info(f"Payment: {self.name}")
+        _logger.info(f"Vendor: {self.partner_id.name}")
+        _logger.info(f"Amount: {self.amount}")
+        _logger.info(f"Funding Type: {funding_type}")
+        _logger.info(f"Process Date: {payment_data.get('processDate', 'NOT SET')}")
+        _logger.info(f"Full payload: {payment_data}")
+        _logger.info("=" * 80)
 
         return payment_data
 

@@ -142,25 +142,25 @@ class BillcomService(models.AbstractModel):
                     subtype_xmlid="mail.mt_note",
                 )
 
-                # If this is a vendor and it has bank accounts, sync them separately
+                # Note: Bank account information is now included in paymentInformation
+                # within the vendor data (see _prepare_partner_data in res_partner.py)
+                # The separate sync_vendor_bank_account method is only needed for updates
+                # after the vendor is already created in Bill.com
+
+                # If this is a vendor and it has bank accounts, they're already included
+                # in paymentInformation field of vendor_data
                 if partner_type == "vendor" and partner.bank_ids:
-                    _logger.info("Syncing bank account for vendor %s", partner.name)
-                    # Wait a moment to ensure the vendor is fully created in Bill.com
-                    time.sleep(1)
-                    try:
-                        self.sync_vendor_bank_account(partner)
-                    except Exception as e:
-                        _logger.warning(
-                            "Bank account sync failed for vendor %s: %s",
-                            partner.name,
-                            str(e),
-                        )
-                        # Post warning to chatter
-                        partner.message_post(
-                            body=f"<p><strong>Bill.com Bank Account Sync Warning</strong></p>"
-                            f"<p>Bank account synchronization failed: {str(e)}</p>",
-                            message_type="notification",
-                            subtype_xmlid="mail.mt_note",
+                    _logger.info(
+                        "Bank account for vendor %s included in paymentInformation",
+                        partner.name,
+                    )
+                    # Update billcom_vendor_bank_id if Bill.com returns it in the response
+                    if result.get("paymentInformation"):
+                        bank = partner.bank_ids[0]
+                        bank.with_context(skip_billcom_sync=True).write(
+                            {
+                                "billcom_last_sync_date": fields.Datetime.now(),
+                            }
                         )
 
                 return partner_id
@@ -631,7 +631,13 @@ class BillcomService(models.AbstractModel):
             # Create bank account data
             # Ensure we have valid account number and routing number
             account_number = bank.acc_number
-            routing_number = bank.aba_routing
+            # Get routing number from res.bank (via related field or direct bank field)
+            # Priority: bank.routing_number (related from bank_id.routing_number) > bank.aba_routing (l10n_us fallback)
+            routing_number = (
+                bank.routing_number
+                or (bank.aba_routing if hasattr(bank, "aba_routing") else None)
+                or (bank.bank_id.routing_number if bank.bank_id else None)
+            )
 
             if not account_number or account_number == "":
                 _logger.error(
@@ -653,15 +659,14 @@ class BillcomService(models.AbstractModel):
                 "nameOnAccount": bank.acc_holder_name or partner.name,
                 "accountNumber": account_number,
                 "routingNumber": routing_number,
-                "type": "CHECKING",  # Default to checking account
-                "ownerType": "BUSINESS"
-                if partner.company_type == "company"
-                else "PERSONAL",
-                "bankCountry": bank.bank_id.country.code
-                if bank.bank_id and bank.bank_id.country
-                else "US",
-                "paymentCurrency": bank.currency_id.code if bank.currency_id else "USD",
+                "type": bank.billcom_account_type or "CHECKING",
+                "ownerType": bank.billcom_owner_type
+                or ("BUSINESS" if partner.company_type == "company" else "PERSONAL"),
+                "paymentCurrency": bank.currency_id.name if bank.currency_id else "USD",
             }
+
+            _logger.debug("Bank account data payload: %s", bank_data)
+
             # Create new bank account
             _logger.info(
                 "Creating bank account for vendor %s in Bill.com", partner.name
@@ -676,9 +681,41 @@ class BillcomService(models.AbstractModel):
                 # Handle different response formats
                 if isinstance(result, dict) and result.get("id"):
                     _logger.info(
-                        "Successfully created bank account for vendor %s in Bill.com",
+                        "Successfully created bank account for vendor %s in Bill.com. ID: %s",
                         partner.name,
+                        result.get("id"),
                     )
+
+                    # Update res.partner.bank with Bill.com ID and metadata
+                    bank.with_context(skip_billcom_sync=True).write(
+                        {
+                            "billcom_vendor_bank_id": result.get("id"),
+                            "billcom_account_status": result.get("status", ""),
+                            "billcom_last_sync_date": fields.Datetime.now(),
+                        }
+                    )
+
+                    # Post success message to partner chatter
+                    partner.message_post(
+                        body=_(
+                            "<p><strong>Bank Account Synced to Bill.com</strong></p>"
+                            "<ul>"
+                            "<li>Bank: %s</li>"
+                            "<li>Account: ****%s</li>"
+                            "<li>Bill.com ID: %s</li>"
+                            "<li>Status: %s</li>"
+                            "</ul>"
+                        )
+                        % (
+                            bank.bank_id.name if bank.bank_id else "Unknown",
+                            account_number[-4:] if len(account_number) >= 4 else "****",
+                            result.get("id"),
+                            result.get("status", "Unknown"),
+                        ),
+                        message_type="notification",
+                        subtype_xmlid="mail.mt_note",
+                    )
+
                     return True
                 elif isinstance(result, list) and len(result) > 0:
                     # Extract error message from list response
@@ -1719,34 +1756,49 @@ class BillcomService(models.AbstractModel):
 
         # Process bank account information if available
         payment_info = billcom_data.get("paymentInformation", {})
-        bank_account_data = payment_info.get("bankAccount")
 
-        if bank_account_data and bank_account_data.get("routingNumber"):
-            self._sync_partner_bank_account(partner, bank_account_data)
+        if payment_info and payment_info.get("bankAccount"):
+            self._sync_partner_bank_account(partner, payment_info)
 
         # Update queue item with record_id
         queue_item.record_id = partner.id
 
         return True
 
-    def _sync_partner_bank_account(self, partner, bank_account_data):
-        """Create or update partner bank account from BILL data
+    def _sync_partner_bank_account(self, partner, payment_info):
+        """Create or update partner bank account from Bill.com paymentInformation
 
         Args:
             partner: res.partner record
-            bank_account_data: Bank account data from BILL
+            payment_info: paymentInformation dict from Bill.com vendor data
+
+        Structure of paymentInformation:
+        {
+            "payeeName": "John Doe",
+            "payByType": "WALLET",  // or "CHECK", "BANK_ACCOUNT", "AP_CARD"
+            "payBySubType": "NONE", // or "ACH", "INTERNATIONAL_WIRE", etc.
+            "bankAccount": {
+                "accountNumber": "************1111",  // Often masked
+                "routingNumber": "011401533",
+                "type": "CHECKING",  // or "SAVINGS"
+                "ownerType": "BUSINESS"  // or "PERSONAL"
+            }
+        }
         """
+        bank_account_data = payment_info.get("bankAccount", {})
         routing_number = bank_account_data.get("routingNumber")
         account_number = bank_account_data.get("accountNumber", "")
 
-        # BILL masks account numbers, so we can only update if we have full number
-        # or if the account doesn't exist yet
+        # Bill.com masks account numbers, so we can only update if we have full number
         if not routing_number:
+            _logger.info(
+                f"No routing number in paymentInformation for {partner.name}, skipping bank account sync"
+            )
             return
 
         # Find bank by routing number
         bank = self.env["res.bank"].search(
-            [("bic", "=", routing_number)],  # In US, routing number goes in BIC field
+            [("routing_number", "=", routing_number)],  # In US, routing number goes in BIC field
             limit=1,
         )
 
@@ -1755,11 +1807,11 @@ class BillcomService(models.AbstractModel):
             bank = self.env["res.bank"].create(
                 {
                     "name": bank_account_data.get("bankName", f"Bank {routing_number}"),
-                    "bic": routing_number,
+                    "routing_number": routing_number,
                 }
             )
 
-        # Check if partner already has this bank account
+        # Check if partner already has this bank account (by routing number)
         existing_bank_account = self.env["res.partner.bank"].search(
             [
                 ("partner_id", "=", partner.id),
@@ -1768,23 +1820,48 @@ class BillcomService(models.AbstractModel):
             limit=1,
         )
 
+        # Prepare bank account values
         bank_vals = {
             "partner_id": partner.id,
             "bank_id": bank.id,
+            # Bill.com specific fields
+            "routing_number": routing_number,
+            "billcom_pay_by_type": payment_info.get("payByType"),
+            "billcom_pay_by_subtype": payment_info.get("payBySubType", "NONE"),
+            "billcom_account_type": bank_account_data.get("type"),
+            "billcom_owner_type": bank_account_data.get("ownerType"),
+            "billcom_last_sync_date": fields.Datetime.now(),
         }
 
         # Only set account number if not masked (doesn't contain *)
-        if "*" not in account_number and account_number:
+        is_masked = "*" in account_number
+        if not is_masked and account_number:
             bank_vals["acc_number"] = account_number
+        elif is_masked and existing_bank_account and existing_bank_account.acc_number:
+            # Keep existing full account number if Bill.com returns masked version
+            _logger.info(
+                f"Bill.com returned masked account number for {partner.name}, keeping existing full number"
+            )
 
         if existing_bank_account:
-            # Update existing
+            # Update existing bank account
             existing_bank_account.write(bank_vals)
-            _logger.info(f"Updated bank account for {partner.name}")
-        elif "*" not in account_number and account_number:
-            # Only create if we have full account number
+            _logger.info(
+                f"Updated bank account for {partner.name} "
+                f"(type: {payment_info.get('payByType')}, routing: {routing_number})"
+            )
+        elif not is_masked and account_number:
+            # Only create new bank account if we have full account number
             self.env["res.partner.bank"].create(bank_vals)
-            _logger.info(f"Created bank account for {partner.name}")
+            _logger.info(
+                f"Created bank account for {partner.name} "
+                f"(type: {payment_info.get('payByType')}, routing: {routing_number})"
+            )
+        else:
+            _logger.warning(
+                f"Cannot create bank account for {partner.name}: "
+                f"Bill.com returned masked account number {account_number}"
+            )
 
     def _process_customer_from_billcom(self, queue_item, billcom_data):
         """Create or update customer from BILL data"""

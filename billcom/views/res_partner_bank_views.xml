@@ -1,14 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
 
+    <!-- Action to sync bank account to Bill.com -->
+    <record id="action_sync_bank_account_to_billcom" model="ir.actions.server">
+        <field name="name">Sync to Bill.com</field>
+        <field name="model_id" ref="base.model_res_partner_bank"/>
+        <field name="binding_model_id" ref="base.model_res_partner_bank"/>
+        <field name="state">code</field>
+        <field name="code">records.sync_bank_account_to_billcom()</field>
+        <field name="groups_id" eval="[(4, ref('account.group_account_invoice'))]"/>
+    </record>
+
     <!-- View res.partner.bank form -->
     <record id="view_res_partner_bank_form" model="ir.ui.view">
         <field name="name">view.res.partner.bank.form</field>
         <field name="model">res.partner.bank</field>
         <field name="inherit_id" ref="base.view_partner_bank_form"/>
         <field name="arch" type="xml">
+            <xpath expr="//field[@name='acc_holder_name']" position="after">
+                <field name="routing_number" />
+            </xpath>
             <xpath expr="//field[@name='active']" position="after">
+
                 <field name="billcom_funding_account_id" widget="many2one" options="{'no_create': True}" domain="[('active', '=', True)]"/>
+                <group string="Bill.com Vendor Bank Account" name="billcom_vendor_bank"
+                       attrs="{'invisible': [('partner_id', '=', False)]}">
+                    <field name="billcom_vendor_bank_id" readonly="1"/>
+                    <field name="billcom_pay_by_type"/>
+                    <field name="billcom_pay_by_subtype"/>
+                    <field name="billcom_account_type"/>
+                    <field name="billcom_owner_type"/>
+                    <field name="billcom_account_status" readonly="1"/>
+                    <field name="billcom_last_sync_date" readonly="1"/>
+                </group>
+            </xpath>
+
+            <!-- Add sync button to header -->
+            <xpath expr="//sheet" position="before">
+                <header>
+                    <button name="%(action_sync_bank_account_to_billcom)d"
+                            string="Sync to Bill.com"
+                            type="action"
+                            class="oe_highlight"
+                            groups="account.group_account_invoice"/>
+                </header>
+
             </xpath>
         </field>
     </record>

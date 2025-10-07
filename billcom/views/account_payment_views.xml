@@ -58,10 +58,26 @@
                             name="billcom_funding_account_type"
                             attrs="{'required': [('is_sync_to_billcom', '=', True)]}"
                         />
-                        <field
-                            name="billcom_process_date"
-                            attrs="{'invisible': [('billcom_funding_account_type', '!=', 'WALLET')]}"
+                        <field name="is_process_date_sync" invisible="1"/>
+                        <label
+                            for="billcom_process_date"
+                            attrs="{'invisible': [('billcom_funding_account_type', 'not in', ['WALLET', 'AP_CARD']), ('is_process_date_sync', '=', True)]}"
                         />
+                        <div attrs="{'invisible': [('billcom_funding_account_type', 'not in', ['WALLET', 'AP_CARD']), ('is_process_date_sync', '=', True)]}">
+                            <field
+                                name="billcom_process_date"
+                                class="oe_inline"
+                                attrs="{'required': ['|' , ('billcom_funding_account_type', 'in', ['WALLET', 'AP_CARD']), ('is_process_date_sync', '=', False)]}"
+                            />
+                            <button
+                                name="action_set_process_date_for_new_vendor"
+                                string="Set +2 Business Days"
+                                type="object"
+                                class="btn-link"
+                                icon="fa-calendar-plus-o"
+                                help="Set process date to 2 business days ahead (required for new vendor bank accounts)"
+                            />
+                        </div>
                         <field name="billcom_pay_faster" />
                         <field
                             name="billcom_check_delivery_type"
