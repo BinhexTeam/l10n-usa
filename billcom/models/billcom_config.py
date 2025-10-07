@@ -238,7 +238,7 @@ class BillcomConfig(models.Model):
         help="Interval in minutes between automatic synchronizations",
     )
     api_url = fields.Char(
-        string="API URL", compute="_compute_api_url", store=True, readonly=True
+        string="API URL", compute="_compute_api_url", store=True, readonly=False
     )
 
     # Dashboard computed fields
