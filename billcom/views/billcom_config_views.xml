@@ -104,7 +104,7 @@
                                     />
                                     <field
                                         name="user_id"
-                                        placeholder="User ID (optional)"
+                                        placeholder="User ID"
                                     />
                                 </group>
                                 <group string="MFA Configuration">
