@@ -323,7 +323,7 @@ class BillcomConfig(models.Model):
             if record.environment == "sandbox":
                 record.api_url = "https://gateway.stage.bill.com/connect"
             else:
-                record.api_url = "https://gateway.bill.com/connect"
+                record.api_url = "https://gateway.prod.bill.com/connect"
 
     def test_connection(self):
         """Test the connection to Bill.com API"""
