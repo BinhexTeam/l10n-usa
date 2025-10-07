@@ -17,8 +17,8 @@
                         <field name="phone_number" readonly="1" string="Code sent to" />
                     </group>
                 </group>
-                <group>
-                    <div class="alert alert-info" role="alert">
+                <group col="2" colspan="2">
+                    <div class="alert alert-info" role="alert" colspan="2">
                         <strong>MFA Code Required</strong>
                         <p>A 6-digit code has been sent to your registered phone number.</p>
                         <p>Enter the code below to complete MFA setup.</p>

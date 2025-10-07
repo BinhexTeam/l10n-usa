@@ -96,8 +96,8 @@
                                 </span>
                             </div>
                         </group>
-                        <group>
-                            <div class="alert alert-info" role="alert">
+                        <group colspan="2" col="2">
+                            <div class="alert alert-info" role="alert" colspan="2">
                                 <p>
                                     <strong>How matching works:</strong>
                                 </p>

@@ -39,7 +39,7 @@
                         name="%(action_billcom_sync_wizard)d"
                         type="action"
                         string="Sync Wizard"
-                        class="btn-success"
+                        class="btn-primary"
                         attrs="{'invisible': [('state', '!=', 'connected')]}"
                     />
 
@@ -186,10 +186,10 @@
                                     <field name="sync_bills" />
                                     <field name="sync_invoices" />
                                     <field name="sync_payments" />
-                                    <field
+                                    <!-- <field
                                         name="default_payment_type"
                                         attrs="{'invisible': [('sync_payments', '=', False)]}"
-                                    />
+                                    /> -->
                                 </group>
                             </group>
                             <separator string="Automatic Synchronization" />
@@ -204,7 +204,7 @@
                                 </group>
                                 <group>
                                     <div
-                                        class="alert alert-info"
+                                        class="alert alert-info" colspan="2"
                                         attrs="{'invisible': [('auto_sync_enabled', '=', False)]}"
                                     >
                                         <i
