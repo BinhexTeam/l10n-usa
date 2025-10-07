@@ -113,7 +113,7 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         endpoint = "vendors" if self.partner_type == "vendor" else "customers"
         try:
             result = service._make_request(endpoint, method="GET")
-            billcom_partners = result.get("data", [])
+            billcom_partners = result.get("results", [])
         except Exception as e:
             raise UserError(_("Error fetching data from Bill.com: %s") % str(e))
 
