@@ -9,7 +9,8 @@
     "depends": [
         "base",
         "web",
-        "account",
+        "l10n_us",
+        "l10n_us_account_routing",
         "contacts",
     ],
     "external_dependencies": {
@@ -40,12 +41,11 @@
         "views/billcom_sync_queue_views.xml",
         "views/billcom_webhook_log_views.xml",
         "views/menus.xml",
-        "views/res_bank_views.xml",
         "views/res_partner_bank_views.xml",
         "views/res_partner_views.xml",
         "wizards/billcom_mfa_wizard_views.xml",
         "wizards/billcom_partner_matching_wizard_views.xml",
-        "wizards/billcom_sync_wizard.xml"
+        "wizards/billcom_sync_wizard.xml",
     ],
     "installable": True,
     "application": True,

@@ -11,8 +11,12 @@ class ResPartner(models.Model):
     _inherit = ["res.partner", "billcom.abstract.model"]
 
     billcom_res_currency_id = fields.Many2one(
-        "res.currency", string="Bill.com Currency", help="Currency for Bill.com transactions",
-        compute="_compute_billcom_currency_id", store=True, readonly=False
+        "res.currency",
+        string="Bill.com Currency",
+        help="Currency for Bill.com transactions",
+        compute="_compute_billcom_currency_id",
+        store=True,
+        readonly=False,
     )
 
     billcom_sync_state = fields.Selection(
@@ -126,19 +130,18 @@ class ResPartner(models.Model):
 
                 # Check if we have minimum required bank information
                 # Get routing number with priority
-                routing_number = (
-                    bank.routing_number
-                    or (bank.aba_routing if hasattr(bank, "aba_routing") else None)
-                    or (bank.bank_id.routing_number if bank.bank_id else None)
+                routing_number = bank.aba_routing or (
+                    bank.bank_id.routing_number if bank.bank_id else None
                 )
 
                 if bank.acc_number and routing_number:
                     payment_info = {
                         "payeeName": bank.acc_holder_name or self.name,
+                        "payByType": bank.billcom_pay_by_type or "CHECK",
+                        "payBySubType": bank.billcom_pay_by_subtype or "NONE",
                         "bankAccount": {
                             "nameOnAccount": bank.acc_holder_name or self.name,
                             "accountNumber": bank.acc_number,
-                            "routingNumber": routing_number,
                             "type": bank.billcom_account_type or "CHECKING",
                             "ownerType": bank.billcom_owner_type
                             or ("BUSINESS" if self.is_company else "PERSONAL"),
@@ -147,10 +150,59 @@ class ResPartner(models.Model):
 
                     # Add international vendor fields if applicable
                     # Check if vendor is international (not US)
-                    if self.country_id and self.country_id.code != "US":
+                    if self.country_id and self.country_id.code == "US":
+                        payment_info["bankAccount"].update(
+                            {"routingNumber": routing_number}
+                        )
+                    else:
                         payment_info["bankCountry"] = self.country_id.code
                         if bank.currency_id:
                             payment_info["paymentCurrency"] = bank.currency_id.name
+
+                        payment_info.setdefault("bankInfo", {}).update(
+                            {
+                                "countryISO": self.country_id.code,
+                            }
+                        )
+
+                        if bank.bank_id:
+                            payment_info["bankInfo"].update(
+                                {
+                                    "branchName": "",
+                                }
+                            )
+                            if bank.bank_id.name:
+                                payment_info["bankInfo"].update(
+                                    {
+                                        "institutionName": bank.bank_id.name,
+                                    }
+                                )
+                            if bank.bank_id.bic:
+                                payment_info["bankInfo"].update(
+                                    {
+                                        "swiftBIC": bank.bank_id.bic,
+                                    }
+                                )
+                            if bank.bank_id.street:
+                                payment_info["bankInfo"].setdefault(
+                                    "address", {}
+                                ).update({"line1": bank.bank_id.street})
+                            if bank.bank_id.city:
+                                payment_info["bankInfo"].setdefault(
+                                    "address", {}
+                                ).update({"city": bank.bank_id.city})
+                            if bank.bank_id.state:
+                                payment_info["bankInfo"].setdefault("address", {})[
+                                    "stateOrProvince"
+                                ] = bank.bank_id.state.code
+                            if bank.bank_id.zip:
+                                payment_info["bankInfo"].setdefault("address", {})[
+                                    "zipOrPostalCode"
+                                ] = bank.bank_id.zip
+                            if bank.bank_id.country:
+                                payment_info["bankInfo"].setdefault("address", {})[
+                                    "country"
+                                ] = bank.bank_id.country.name
 
                     vendor_data["paymentInformation"] = payment_info
                     _logger.info(
@@ -240,12 +292,6 @@ class ResPartner(models.Model):
     _sync_vendors_cron = _sync_partners_cron
 
 
-class ResBank(models.Model):
-    _inherit = "res.bank"
-
-    routing_number = fields.Char(string="Routing Number", help="Bank routing number (for US banks)")
-
-
 class ResPartnerBank(models.Model):
     _inherit = "res.partner.bank"
 
@@ -267,21 +313,16 @@ class ResPartnerBank(models.Model):
         copy=False,
         readonly=True,
     )
-    routing_number = fields.Char(
-        related="bank_id.routing_number",
-        readonly=False,
-        string="Bill.com Routing Number",
-        help="Bank routing number (for US banks)",
-        copy=False,
-    )
-
-
     billcom_pay_by_type = fields.Selection(
         [
+            ("ACH", "ACH"),
             ("WALLET", "Wallet"),
             ("CHECK", "Check"),
-            ("BANK_ACCOUNT", "Bank Account"),
-            ("AP_CARD", "AP Card"),
+            ("VIRTUAL_CARD", "VIRTUAL CARD"),
+            ("UNDEFINED", "UNDEFINED"),
+            ("RPPS", "RPPS"),
+            ("INTERNATIONAL_E_PAYMENT", "INTERNATIONAL EPAYMENT"),
+            ("OFFLINE", "OFFLINE"),
         ],
         string="Bill.com Pay By Type",
         help="Default payment method for this vendor in Bill.com",
@@ -291,10 +332,11 @@ class ResPartnerBank(models.Model):
         [
             ("NONE", "None"),
             ("ACH", "ACH"),
-            ("INTERNATIONAL_WIRE", "International Wire"),
-            ("DOMESTIC_WIRE", "Domestic Wire"),
-            ("VIRTUAL_CARD", "Virtual Card"),
-            ("PHYSICAL_CARD", "Physical Card"),
+            ("WIRE", "International Wire"),
+            ("IACH", "IACH"),
+            ("LOCAL", "LOCAL"),
+            ("MULTIPLE", "MULTIPLE"),
+            ("UNDEFINED", "UNDEFINED"),
         ],
         string="Bill.com Pay By Subtype",
         help="Payment subtype in Bill.com",
@@ -360,12 +402,9 @@ class ResPartnerBank(models.Model):
 
         # Only sync if we have required bank information
         # Get routing number with priority
-        routing_number = (
-            self.routing_number
-            or (self.aba_routing if hasattr(self, "aba_routing") else None)
-            or (self.bank_id.routing_number if self.bank_id else None)
+        routing_number = self.aba_routing or (
+            self.bank_id.routing_number if self.bank_id else None
         )
-
         if not self.acc_number or not routing_number:
             _logger.warning(
                 f"Cannot sync bank account: missing account number or routing number "
@@ -395,15 +434,12 @@ class ResPartnerBank(models.Model):
             # Endpoint: POST /v3/vendors/:vendorId/bank-account
 
             # Get routing number with priority: routing_number field > aba_routing (l10n_us) > bank_id.bic
-            routing_number = (
-                self.routing_number
-                or (self.aba_routing if hasattr(self, "aba_routing") else None)
-                or (self.bank_id.routing_number if self.bank_id else None)
+            routing_number = self.aba_routing or (
+                self.bank_id.routing_number if self.bank_id else None
             )
-
             bank_account_data = {
+                "bankName": self.bank_id.name if self.bank_id else "Unknown",
                 "accountNumber": self.acc_number,
-                "routingNumber": routing_number,
                 "type": self.billcom_account_type or "CHECKING",
                 "ownerType": self.billcom_owner_type
                 or (
@@ -411,10 +447,11 @@ class ResPartnerBank(models.Model):
                     if self.partner_id.company_type == "company"
                     else "PERSONAL"
                 ),
-                "paymentCurrency": self.currency_id.name
-                if self.currency_id
-                else "USD",
+                "paymentCurrency": self.currency_id.name if self.currency_id else "USD",
             }
+
+            if self.bank_id.country.code == "US":
+                bank_account_data["routingNumber"] = routing_number
 
             # Add name on account if available
             if self.acc_holder_name:
@@ -432,7 +469,9 @@ class ResPartnerBank(models.Model):
             if self.billcom_vendor_bank_id:
                 # Update existing bank account
                 # Note: Bill.com may use PATCH or PUT for updates
-                endpoint = f"vendors/{vendor_id}/bank-account/{self.billcom_vendor_bank_id}"
+                endpoint = (
+                    f"vendors/{vendor_id}/bank-account/{self.billcom_vendor_bank_id}"
+                )
                 method = "PATCH"
                 _logger.info(
                     f"Updating existing Bill.com bank account {self.billcom_vendor_bank_id}"
@@ -475,9 +514,7 @@ class ResPartnerBank(models.Model):
                     )
                     % (
                         self.bank_id.name,
-                        self.acc_number[-4:]
-                        if len(self.acc_number) >= 4
-                        else "****",
+                        self.acc_number[-4:] if len(self.acc_number) >= 4 else "****",
                         response["id"],
                         response.get("status", "Unknown"),
                     ),

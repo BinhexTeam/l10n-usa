@@ -1,5 +1,4 @@
 import logging
-import time
 from datetime import timedelta
 
 from odoo import _, api, fields, models
@@ -66,7 +65,7 @@ class BillcomService(models.AbstractModel):
             partner_data["address"] = {
                 "line1": partner.street or "Unknown",
                 "city": partner.city or "Unknown",
-                "stateOrProvince": partner.state_id.code if partner.state_id else "",
+                "stateOrProvince": partner.state_id.name if partner.state_id else "",
                 "zipOrPostalCode": partner.zip or "",
                 "country": partner.country_id.code if partner.country_id else "US",
             }
@@ -86,20 +85,25 @@ class BillcomService(models.AbstractModel):
 
             if existing_id:
                 # Update existing partner
-                if partner.country_id.code != "US" and partner_data.get("paymentInformation", False):
-                    partner_data["paymentInformation"].update({
-                        "paymentPurpose": {
-                            # "text": "",
-                            "code": {
-                                "name": partner.billcom_payment_purpose_id.code,
-                                "value": partner.billcom_payment_purpose_id.description
+                if (
+                    partner.country_id.code != "US"
+                    and partner.billcom_payment_purpose_id
+                ):
+                    partner_data.setdefault("paymentInformation", {}).update(
+                        {
+                            "paymentPurpose": {
+                                # "text": "",
+                                "code": {
+                                    "name": partner.billcom_payment_purpose_id.code,
+                                    "value": partner.billcom_payment_purpose_id.description,
+                                }
                             }
                         }
-                    })
+                    )
 
                 _logger.info(
                     "Updating partner_data %s with paymentPurpose in Bill.com",
-                    partner_data
+                    partner_data,
                 )
 
                 _logger.info(
@@ -648,24 +652,9 @@ class BillcomService(models.AbstractModel):
             # Create bank account data
             # Ensure we have valid account number and routing number
             account_number = bank.acc_number
-            # Get routing number from res.bank (via related field or direct bank field)
-            # Priority: bank.routing_number (related from bank_id.routing_number) > bank.aba_routing (l10n_us fallback)
-            routing_number = (
-                bank.routing_number
-                or (bank.aba_routing if hasattr(bank, "aba_routing") else None)
-                or (bank.bank_id.routing_number if bank.bank_id else None)
-            )
-
             if not account_number or account_number == "":
                 _logger.error(
                     "Cannot create bank account: Missing account number for vendor %s",
-                    partner.name,
-                )
-                return False
-
-            if not routing_number or routing_number == "":
-                _logger.error(
-                    "Cannot create bank account: Missing routing number for vendor %s",
                     partner.name,
                 )
                 return False
@@ -675,12 +664,76 @@ class BillcomService(models.AbstractModel):
             bank_data = {
                 "nameOnAccount": bank.acc_holder_name or partner.name,
                 "accountNumber": account_number,
-                "routingNumber": routing_number,
                 "type": bank.billcom_account_type or "CHECKING",
                 "ownerType": bank.billcom_owner_type
                 or ("BUSINESS" if partner.company_type == "company" else "PERSONAL"),
                 "paymentCurrency": bank.currency_id.name if bank.currency_id else "USD",
             }
+
+            routing_number = bank.aba_routing or (
+                bank.bank_id.routing_number if bank.bank_id else None
+            )
+            if partner.country_id and partner.country_id.code == "US":
+                # Get routing number from res.bank (via related field or direct bank field)
+                # Priority: bank.routing_number (related from bank_id.routing_number) > bank.aba_routing (l10n_us fallback)
+                if not routing_number or routing_number == "":
+                    _logger.error(
+                        "Cannot create bank account: Missing routing number for vendor %s",
+                        partner.name,
+                    )
+                    return False
+
+                bank_data.update({"routingNumber": routing_number})
+
+            else:
+                if not bank.bank_id.bic:
+                    bank_data.update({"routingNumber": routing_number})
+
+                # For non-US banks, we can include SWIFT/BIC and bank address if available
+                bank_data.setdefault("bankInfo", {}).update(
+                    {
+                        "countryISO": partner.country_id.code,
+                    }
+                )
+
+                if bank.bank_id:
+                    bank_data["bankInfo"].update(
+                        {
+                            "branchName": "",
+                        }
+                    )
+                    if bank.bank_id.name:
+                        bank_data["bankInfo"].update(
+                            {
+                                "institutionName": bank.bank_id.name,
+                            }
+                        )
+                    if bank.bank_id.bic:
+                        bank_data["bankInfo"].update(
+                            {
+                                "swiftBIC": bank.bank_id.bic,
+                            }
+                        )
+                    if bank.bank_id.street:
+                        bank_data["bankInfo"].setdefault("address", {}).update(
+                            {"line1": bank.bank_id.street}
+                        )
+                    if bank.bank_id.city:
+                        bank_data["bankInfo"].setdefault("address", {}).update(
+                            {"city": bank.bank_id.city}
+                        )
+                    if bank.bank_id.state_id:
+                        bank_data["bankInfo"].setdefault("address", {})[
+                            "stateOrProvince"
+                        ] = bank.bank_id.state_id.code
+                    if bank.bank_id.zip:
+                        bank_data["bankInfo"].setdefault("address", {})[
+                            "zipOrPostalCode"
+                        ] = bank.bank_id.zip
+                    if bank.bank_id.country_id:
+                        bank_data["bankInfo"].setdefault("address", {})[
+                            "country"
+                        ] = bank.bank_id.country_id.name
 
             _logger.debug("Bank account data payload: %s", bank_data)
 
@@ -1815,7 +1868,9 @@ class BillcomService(models.AbstractModel):
 
         # Find bank by routing number
         bank = self.env["res.bank"].search(
-            [("routing_number", "=", routing_number)],  # In US, routing number goes in BIC field
+            [
+                ("routing_number", "=", routing_number)
+            ],  # In US, routing number goes in BIC field
             limit=1,
         )
 
@@ -1853,7 +1908,6 @@ class BillcomService(models.AbstractModel):
         # Only set account number if not masked (doesn't contain *)
         if account_number:
             bank_vals["acc_number"] = account_number
-
 
         if existing_bank_account:
             # Update existing bank account
