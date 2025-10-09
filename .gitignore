@@ -1,3 +1,7 @@
+# ClaudeCode .gitignore
+/.serena
+claudedocs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -1906,7 +1906,8 @@ class BillcomService(models.AbstractModel):
         }
 
         # Only set account number if not masked (doesn't contain *)
-        if account_number:
+        is_masked = account_number and "*" in account_number
+        if account_number and not is_masked:
             bank_vals["acc_number"] = account_number
 
         if existing_bank_account:
@@ -1916,18 +1917,20 @@ class BillcomService(models.AbstractModel):
                 f"Updated bank account for {partner.name} "
                 f"(type: {payment_info.get('payByType')}, routing: {routing_number})"
             )
-        elif account_number:
-            # Only create new bank account if we have full account number
-            self.env["res.partner.bank"].create(bank_vals)
-            _logger.info(
-                f"Created bank account for {partner.name} "
-                f"(type: {payment_info.get('payByType')}, routing: {routing_number})"
-            )
         else:
-            _logger.warning(
-                f"Cannot create bank account for {partner.name}: "
-                f"Bill.com returned masked account number {account_number}"
-            )
+            # Create bank account even with masked account number
+            # We have routing number and Bill.com metadata which is valuable for sync
+            self.env["res.partner.bank"].create(bank_vals)
+            if is_masked:
+                _logger.info(
+                    f"Created bank account for {partner.name} with masked account number "
+                    f"(type: {payment_info.get('payByType')}, routing: {routing_number})"
+                )
+            else:
+                _logger.info(
+                    f"Created bank account for {partner.name} "
+                    f"(type: {payment_info.get('payByType')}, routing: {routing_number})"
+                )
 
     def _process_customer_from_billcom(self, queue_item, billcom_data):
         """Create or update customer from BILL data"""

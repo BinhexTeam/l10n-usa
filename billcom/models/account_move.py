@@ -21,6 +21,9 @@ class AccountMove(models.Model):
         string="Bill.com Documents",
         help="Documents attached to this bill in Bill.com",
     )
+    billcom_invoice_number = fields.Char(
+        string="Bill.com Invoice Number",
+    )
 
     def _prepare_bill_data(self):
         """Prepare bill data for Bill.com API"""
@@ -64,7 +67,7 @@ class AccountMove(models.Model):
             "vendorId": self.partner_id.billcom_id or self.partner_id.billcom,
             "billLineItems": lines,
             "invoice": {
-                "invoiceNumber": self.name or "",
+                "invoiceNumber": self.billcom_invoice_number or self.name or "",
                 "invoiceDate": self.invoice_date.isoformat()
                 if self.invoice_date
                 else "",
@@ -180,6 +183,7 @@ class AccountMove(models.Model):
     def button_sync_to_billcom(self):
         """Sync document to Bill.com"""
         self.ensure_one()
+
         if not self.is_sync_to_billcom or not self.partner_id.is_sync_to_billcom:
             return False
 
