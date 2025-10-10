@@ -51,7 +51,7 @@ class BillcomSyncWizard(models.TransientModel):
             ("bidirectional", "Bidirectional"),
         ],
         string="Sync Direction",
-        default="odoo_to_billcom",
+        default="billcom_to_odoo",
         required=True,
     )
 
@@ -85,6 +85,66 @@ class BillcomSyncWizard(models.TransientModel):
         string="Only Bill.com Enabled Records",
         default=True,
         help="Only sync records marked for Bill.com synchronization",
+    )
+
+    # Advanced Filters (Bill.com API v3 specific)
+    # Vendor/Customer Filters
+    filter_vendor_account_type = fields.Selection(
+        [
+            ("BUSINESS", "Business"),
+            ("PERSON", "Person"),
+        ],
+        string="Vendor Account Type",
+        help="Filter vendors by account type",
+    )
+    filter_vendor_currency = fields.Many2one(
+        "res.currency",
+        string="Vendor Currency",
+        help="Filter vendors by bill currency (e.g., USD, CAD)",
+    )
+    filter_customer_account_type = fields.Selection(
+        [
+            ("BUSINESS", "Business"),
+            ("PERSON", "Person"),
+        ],
+        string="Customer Account Type",
+        help="Filter customers by account type",
+    )
+
+    # Bill/Invoice Filters - Allow multiple selections
+    filter_bill_status = fields.Many2many(
+        comodel_name="billcom.bill.status",
+        relation="billcom_wizard_bill_status_rel",
+        column1="wizard_id",
+        column2="status_id",
+        string="Bill Payment Status",
+        help="Filter bills by payment status (leave empty for all statuses)",
+    )
+    filter_bill_approval_status = fields.Many2many(
+        comodel_name="billcom.bill.approval.status",
+        relation="billcom_wizard_bill_approval_status_rel",
+        column1="wizard_id",
+        column2="status_id",
+        string="Bill Approval Status",
+        help="Filter bills by approval status (leave empty for all statuses)",
+    )
+    filter_invoice_status = fields.Many2many(
+        comodel_name="billcom.invoice.status",
+        relation="billcom_wizard_invoice_status_rel",
+        column1="wizard_id",
+        column2="status_id",
+        string="Invoice Status",
+        help="Filter invoices by status (leave empty for all statuses)",
+    )
+
+    # Payment Filters - Allow multiple selections
+    filter_payment_status = fields.Many2many(
+        comodel_name="billcom.payment.status",
+        relation="billcom_wizard_payment_status_rel",
+        column1="wizard_id",
+        column2="status_id",
+        string="Payment Status",
+        help="Filter payments by status (leave empty for all statuses)",
     )
 
     # Processing Options
@@ -404,6 +464,138 @@ class BillcomSyncWizard(models.TransientModel):
 
         return queue_items
 
+    def _build_billcom_filters(self, sync_type):
+        """Build Bill.com API v3 filters string
+
+        Format: filters=field1:op:value,field2:op:value
+        Example: filters=archived:eq:false,createdTime:gte:2025-01-01T00:00:00.000Z
+
+        Args:
+            sync_type: vendor, customer, bill, invoice, or payment
+
+        Returns:
+            dict: Query parameters with filters
+        """
+        filters = []
+        params = {}
+
+        # Common filter: archived = false (only active records)
+        # Note: Only vendors and customers support the 'archived' field
+        if sync_type in ["vendor", "customer"]:
+            filters.append("archived:eq:false")
+
+        # Date filters using createdTime (API v3 format)
+        if self.filter_by_date:
+            if self.date_from:
+                # Convert to ISO 8601 format with time
+                from_datetime = f"{self.date_from.isoformat()}T00:00:00.000Z"
+                filters.append(f"createdTime:gte:{from_datetime}")
+            if self.date_to:
+                # End of day
+                to_datetime = f"{self.date_to.isoformat()}T23:59:59.999Z"
+                filters.append(f"createdTime:lte:{to_datetime}")
+
+        # Partner filter by Bill.com vendor/customer IDs
+        if self.filter_by_partner and self.partner_ids:
+            billcom_ids = self.partner_ids.filtered(lambda p: p.billcom_id).mapped(
+                "billcom_id"
+            )
+            if billcom_ids:
+                # Use different field names based on sync type
+                if sync_type == "vendor":
+                    # For vendor sync, filter vendors by their ID
+                    id_field = "id"
+                elif sync_type == "customer":
+                    # For customer sync, filter customers by their ID
+                    id_field = "id"
+                elif sync_type == "bill":
+                    # For bills, filter by vendorId (the vendor who owns the bill)
+                    id_field = "vendorId"
+                elif sync_type == "invoice":
+                    # For invoices, filter by customerId (the customer who owns the invoice)
+                    id_field = "customerId"
+                elif sync_type == "payment":
+                    # For payments, filter by vendorId (the vendor being paid)
+                    id_field = "vendorId"
+                else:
+                    id_field = "id"
+
+                if len(billcom_ids) == 1:
+                    # Single ID: use eq operator
+                    filters.append(f"{id_field}:eq:{billcom_ids[0]}")
+                else:
+                    # Multiple IDs: use in operator with parentheses around values
+                    ids_str = ",".join(billcom_ids)
+                    filters.append(f"{id_field}:in:({ids_str})")
+
+        # Sync-type specific filters
+        if sync_type == "vendor":
+            if self.filter_vendor_account_type:
+                filters.append(f"accountType:eq:{self.filter_vendor_account_type}")
+            if self.filter_vendor_currency:
+                filters.append(f"billCurrency:eq:{self.filter_vendor_currency.name}")
+
+        elif sync_type == "customer":
+            if self.filter_customer_account_type:
+                filters.append(f"accountType:eq:{self.filter_customer_account_type}")
+
+        elif sync_type == "bill":
+            # Bill payment status filter - supports multiple selections
+            if self.filter_bill_status:
+                status_codes = self.filter_bill_status.mapped("code")
+                if len(status_codes) == 1:
+                    # Single status: use eq operator
+                    filters.append(f"paymentStatus:eq:{status_codes[0]}")
+                else:
+                    # Multiple statuses: use in operator with parentheses
+                    status_str = ",".join(status_codes)
+                    filters.append(f"paymentStatus:in:({status_str})")
+            # If no status selected, fetch all statuses (no filter)
+
+            # Bill approval status filter - supports multiple selections
+            if self.filter_bill_approval_status:
+                approval_codes = self.filter_bill_approval_status.mapped("code")
+                if len(approval_codes) == 1:
+                    # Single status: use eq operator
+                    filters.append(f"approvalStatus:eq:{approval_codes[0]}")
+                else:
+                    # Multiple statuses: use in operator with parentheses
+                    approval_str = ",".join(approval_codes)
+                    filters.append(f"approvalStatus:in:({approval_str})")
+            # If no approval status selected, fetch all statuses (no filter)
+
+        elif sync_type == "invoice":
+            # Invoice status filter - supports multiple selections
+            if self.filter_invoice_status:
+                status_codes = self.filter_invoice_status.mapped("code")
+                if len(status_codes) == 1:
+                    # Single status: use eq operator
+                    filters.append(f"status:eq:{status_codes[0]}")
+                else:
+                    # Multiple statuses: use in operator with parentheses
+                    status_str = ",".join(status_codes)
+                    filters.append(f"status:in:({status_str})")
+            # If no status selected, fetch all statuses (no filter)
+
+        elif sync_type == "payment":
+            # Payment status filter - supports multiple selections
+            if self.filter_payment_status:
+                status_codes = self.filter_payment_status.mapped("code")
+                if len(status_codes) == 1:
+                    # Single status: use eq operator
+                    filters.append(f"status:eq:{status_codes[0]}")
+                else:
+                    # Multiple statuses: use in operator with parentheses
+                    status_str = ",".join(status_codes)
+                    filters.append(f"status:in:({status_str})")
+            # If no status selected, fetch all statuses (no filter)
+
+        # Build final params
+        if filters:
+            params["filters"] = ",".join(filters)
+
+        return params
+
     def _fetch_vendors_from_billcom(self, service, config):
         """Fetch vendors from BILL API and create queue items
 
@@ -417,18 +609,7 @@ class BillcomSyncWizard(models.TransientModel):
         queue_items = []
 
         # Build API filters using BILL API v3 format
-        # Each filter should be a separate query parameter
-        params = {}
-
-        # Only active vendors
-        params["archived"] = "false"
-
-        # Add date filters (always use if available for better API performance)
-        if self.date_from:
-            params["updatedDateStart"] = self.date_from.isoformat()
-        if self.date_to:
-            params["updatedDateEnd"] = self.date_to.isoformat()
-
+        params = self._build_billcom_filters("vendor")
         endpoint = "vendors"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
@@ -444,7 +625,9 @@ class BillcomSyncWizard(models.TransientModel):
                 _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
             )
 
-        _logger.info(f"Fetched {len(vendors_data)} vendors from BILL")
+        _logger.info(
+            f"Fetched {len(vendors_data)} vendors from BILL with filters: {params.get('filters', 'none')}"
+        )
 
         # Create queue items for each vendor from BILL
         for vendor_data in vendors_data:
@@ -454,11 +637,6 @@ class BillcomSyncWizard(models.TransientModel):
             partner = self.env["res.partner"].search(
                 [("billcom_id", "=", billcom_vendor_id)], limit=1
             )
-
-            # Apply partner filter if specified
-            if self.filter_by_partner and self.partner_ids:
-                if partner and partner.id not in self.partner_ids.ids:
-                    continue
 
             # Create queue item with BILL data
             queue_item = self.env["billcom.sync.queue"].create(
@@ -483,18 +661,7 @@ class BillcomSyncWizard(models.TransientModel):
         queue_items = []
 
         # Build API filters using BILL API v3 format
-        # Each filter should be a separate query parameter
-        params = {}
-
-        # Only active customers
-        params["archived"] = "false"
-
-        # Add date filters (always use if available for better API performance)
-        if self.date_from:
-            params["updatedDateStart"] = self.date_from.isoformat()
-        if self.date_to:
-            params["updatedDateEnd"] = self.date_to.isoformat()
-
+        params = self._build_billcom_filters("customer")
         endpoint = "customers"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
@@ -510,7 +677,9 @@ class BillcomSyncWizard(models.TransientModel):
                 _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
             )
 
-        _logger.info(f"Fetched {len(customers_data)} customers from BILL")
+        _logger.info(
+            f"Fetched {len(customers_data)} customers from BILL with filters: {params.get('filters', 'none')}"
+        )
 
         for customer_data in customers_data:
             billcom_customer_id = customer_data.get("id")
@@ -518,10 +687,6 @@ class BillcomSyncWizard(models.TransientModel):
             partner = self.env["res.partner"].search(
                 [("billcom_id", "=", billcom_customer_id)], limit=1
             )
-
-            if self.filter_by_partner and self.partner_ids:
-                if partner and partner.id not in self.partner_ids.ids:
-                    continue
 
             queue_item = self.env["billcom.sync.queue"].create(
                 {
@@ -545,18 +710,7 @@ class BillcomSyncWizard(models.TransientModel):
         queue_items = []
 
         # Build API filters using BILL API v3 format
-        # Each filter should be a separate query parameter
-        params = {}
-
-        # Filter by payment status
-        params["paymentStatus"] = "OPEN,APPROVED,PAID"
-
-        # Add date filters (always use if available for better API performance)
-        if self.date_from:
-            params["invoiceDateStart"] = self.date_from.isoformat()
-        if self.date_to:
-            params["invoiceDateEnd"] = self.date_to.isoformat()
-
+        params = self._build_billcom_filters("bill")
         endpoint = "bills"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
@@ -572,7 +726,9 @@ class BillcomSyncWizard(models.TransientModel):
                 _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
             )
 
-        _logger.info(f"Fetched {len(bills_data)} bills from BILL")
+        _logger.info(
+            f"Fetched {len(bills_data)} bills from BILL with filters: {params.get('filters', 'none')}"
+        )
 
         for bill_data in bills_data:
             billcom_bill_id = bill_data.get("id")
@@ -581,15 +737,6 @@ class BillcomSyncWizard(models.TransientModel):
             move = self.env["account.move"].search(
                 [("billcom_id", "=", billcom_bill_id)], limit=1
             )
-
-            # Apply partner filter if specified
-            if self.filter_by_partner and self.partner_ids:
-                vendor_billcom_id = bill_data.get("vendorId")
-                vendor = self.env["res.partner"].search(
-                    [("billcom_id", "=", vendor_billcom_id)], limit=1
-                )
-                if vendor and vendor.id not in self.partner_ids.ids:
-                    continue
 
             queue_item = self.env["billcom.sync.queue"].create(
                 {
@@ -613,18 +760,7 @@ class BillcomSyncWizard(models.TransientModel):
         queue_items = []
 
         # Build API filters using BILL API v3 format
-        # Each filter should be a separate query parameter
-        params = {}
-
-        # Status filter
-        params["status"] = "SCHEDULED,INPROCESS,COMPLETED"
-
-        # Add date filters (always use if available for better API performance)
-        if self.date_from:
-            params["processDateStart"] = self.date_from.isoformat()
-        if self.date_to:
-            params["processDateEnd"] = self.date_to.isoformat()
-
+        params = self._build_billcom_filters("payment")
         endpoint = "payments"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
@@ -640,7 +776,9 @@ class BillcomSyncWizard(models.TransientModel):
                 _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
             )
 
-        _logger.info(f"Fetched {len(payments_data)} payments from BILL")
+        _logger.info(
+            f"Fetched {len(payments_data)} payments from BILL with filters: {params.get('filters', 'none')}"
+        )
 
         for payment_data in payments_data:
             billcom_payment_id = payment_data.get("id")
@@ -649,15 +787,6 @@ class BillcomSyncWizard(models.TransientModel):
             payment = self.env["account.payment"].search(
                 [("billcom_id", "=", billcom_payment_id)], limit=1
             )
-
-            # Apply partner filter if specified
-            if self.filter_by_partner and self.partner_ids:
-                vendor_billcom_id = payment_data.get("vendorId")
-                vendor = self.env["res.partner"].search(
-                    [("billcom_id", "=", vendor_billcom_id)], limit=1
-                )
-                if vendor and vendor.id not in self.partner_ids.ids:
-                    continue
 
             queue_item = self.env["billcom.sync.queue"].create(
                 {
@@ -681,18 +810,7 @@ class BillcomSyncWizard(models.TransientModel):
         queue_items = []
 
         # Build API filters using BILL API v3 format
-        # Each filter should be a separate query parameter
-        params = {}
-
-        # Filter by status
-        params["status"] = "OPEN,APPROVED,PAID"
-
-        # Add date filters (always use if available for better API performance)
-        if self.date_from:
-            params["invoiceDateStart"] = self.date_from.isoformat()
-        if self.date_to:
-            params["invoiceDateEnd"] = self.date_to.isoformat()
-
+        params = self._build_billcom_filters("invoice")
         endpoint = "invoices"
 
         _logger.info(f"Calling BILL API endpoint: {endpoint} with params: {params}")
@@ -708,7 +826,9 @@ class BillcomSyncWizard(models.TransientModel):
                 _(f"BILL API error: {response.get('errorMessage', 'Unknown error')}")
             )
 
-        _logger.info(f"Fetched {len(invoices_data)} invoices from BILL")
+        _logger.info(
+            f"Fetched {len(invoices_data)} invoices from BILL with filters: {params.get('filters', 'none')}"
+        )
 
         for invoice_data in invoices_data:
             billcom_invoice_id = invoice_data.get("id")
@@ -717,15 +837,6 @@ class BillcomSyncWizard(models.TransientModel):
             move = self.env["account.move"].search(
                 [("billcom_id", "=", billcom_invoice_id)], limit=1
             )
-
-            # Apply partner filter if specified
-            if self.filter_by_partner and self.partner_ids:
-                customer_billcom_id = invoice_data.get("customer", {}).get("id")
-                customer = self.env["res.partner"].search(
-                    [("billcom_id", "=", customer_billcom_id)], limit=1
-                )
-                if customer and customer.id not in self.partner_ids.ids:
-                    continue
 
             queue_item = self.env["billcom.sync.queue"].create(
                 {

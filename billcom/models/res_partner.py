@@ -288,6 +288,83 @@ class ResPartner(models.Model):
             billcom_id, partner_type=partner_type
         )
 
+    def action_fetch_payment_purposes(self):
+        """Fetch payment purposes from Bill.com for international vendor
+
+        This button appears only for international vendors (non-US) that have
+        a currency configured.
+        """
+        self.ensure_one()
+
+        # Validation
+        if not self.country_id:
+            raise UserError(_("Please set the country for this partner first"))
+
+        if self.country_id.code == "US":
+            raise UserError(
+                _(
+                    "Payment purposes are only required for international (non-US) vendors"
+                )
+            )
+
+        if not self.billcom_res_currency_id:
+            raise UserError(
+                _("Please set the Bill.com Currency for this partner first")
+            )
+
+        # Get account type from bank account if exists, otherwise use NONE
+        account_type = "NONE"
+        if self.bank_ids:
+            bank = self.bank_ids[0]
+            account_type = bank.billcom_account_type or "NONE"
+
+        try:
+            # Fetch payment purposes from API
+            payment_purposes = self.env[
+                "billcom.payment.purpose"
+            ].fetch_payment_purposes_for_config(
+                country_id=self.country_id.id,
+                currency_id=self.billcom_res_currency_id.id,
+                account_type=account_type,
+            )
+
+            if not payment_purposes:
+                raise UserError(
+                    _(
+                        "No payment purposes found for country %s, currency %s, account type %s"
+                    )
+                    % (
+                        self.country_id.name,
+                        self.billcom_res_currency_id.name,
+                        account_type,
+                    )
+                )
+
+            # Show notification with count
+            return {
+                "type": "ir.actions.client",
+                "tag": "display_notification",
+                "params": {
+                    "title": _("Payment Purposes Fetched"),
+                    "message": _(
+                        "%d payment purpose(s) loaded from Bill.com. You can now select one."
+                    )
+                    % len(payment_purposes),
+                    "type": "success",
+                    "sticky": False,
+                    "next": {
+                        "type": "ir.actions.act_window",
+                        "res_model": "res.partner",
+                        "res_id": self.id,
+                        "view_mode": "form",
+                        "target": "current",
+                    },
+                },
+            }
+        except Exception as e:
+            _logger.error(f"Error fetching payment purposes: {e}")
+            raise
+
     # Backwards compatibility
     _sync_vendors_cron = _sync_partners_cron
 

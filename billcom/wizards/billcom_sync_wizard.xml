@@ -9,7 +9,8 @@
                 <sheet>
                     <div class="oe_title">
                         <h1>Bill.com Synchronization</h1>
-                        <p>Select the data types and options for synchronization with Bill.com</p>
+                        <p
+                        >Select the data types and options for synchronization with Bill.com</p>
                     </div>
 
                     <!-- Sync Direction - Most important setting first -->
@@ -25,10 +26,16 @@
                         <page string="Partners" name="partners">
                             <group>
                                 <group string="Vendors">
-                                    <field name="sync_vendors" widget="boolean_toggle" />
+                                    <field
+                                        name="sync_vendors"
+                                        widget="boolean_toggle"
+                                    />
                                 </group>
                                 <group string="Customers">
-                                    <field name="sync_customers" widget="boolean_toggle" />
+                                    <field
+                                        name="sync_customers"
+                                        widget="boolean_toggle"
+                                    />
                                 </group>
                             </group>
                         </page>
@@ -40,7 +47,10 @@
                                     <field name="sync_bills" widget="boolean_toggle" />
                                 </group>
                                 <group string="Customer Invoices">
-                                    <field name="sync_invoices" widget="boolean_toggle" />
+                                    <field
+                                        name="sync_invoices"
+                                        widget="boolean_toggle"
+                                    />
                                 </group>
                             </group>
                         </page>
@@ -49,10 +59,16 @@
                         <page string="Transactions" name="transactions">
                             <group>
                                 <group string="Payments">
-                                    <field name="sync_payments" widget="boolean_toggle" />
+                                    <field
+                                        name="sync_payments"
+                                        widget="boolean_toggle"
+                                    />
                                 </group>
                                 <group string="Bill Documents">
-                                    <field name="sync_documents" widget="boolean_toggle" />
+                                    <field
+                                        name="sync_documents"
+                                        widget="boolean_toggle"
+                                    />
                                 </group>
                             </group>
                         </page>
@@ -60,12 +76,20 @@
                         <!-- Tab 4: Filters -->
                         <page string="Filters" name="filters">
                             <group string="Date Filtering">
-                                <div class="alert alert-info mb-3" role="alert" colspan="2">
-                                    <strong>Performance Tip:</strong> Date filtering is highly recommended for better API performance.
+                                <div
+                                    class="alert alert-info mb-3"
+                                    role="alert"
+                                    colspan="2"
+                                >
+                                    <strong
+                                    >Performance Tip:</strong> Date filtering is highly recommended for better API performance.
                                     Default range: last 30 days.
                                 </div>
                                 <group>
-                                    <field name="filter_by_date" widget="boolean_toggle" />
+                                    <field
+                                        name="filter_by_date"
+                                        widget="boolean_toggle"
+                                    />
                                     <field
                                         name="date_from"
                                         attrs="{'invisible': [('filter_by_date', '=', False)], 'required': [('filter_by_date', '=', True)]}"
@@ -79,7 +103,10 @@
 
                             <group string="Partner Filtering">
                                 <group>
-                                    <field name="filter_by_partner" widget="boolean_toggle" />
+                                    <field
+                                        name="filter_by_partner"
+                                        widget="boolean_toggle"
+                                    />
                                     <field
                                         name="partner_ids"
                                         widget="many2many_tags"
@@ -93,13 +120,139 @@
                                     />
                                 </group>
                             </group>
+
+                            <!-- Advanced Bill.com API Filters -->
+                            <group
+                                string="Advanced Vendor Filters"
+                                attrs="{'invisible': [('sync_vendors', '=', False)]}"
+                            >
+                                <div
+                                    class="alert alert-info mb-2"
+                                    role="alert"
+                                    colspan="2"
+                                >
+                                    <small
+                                    >These filters apply to Bill.com API v3 vendor queries</small>
+                                </div>
+                                <group>
+                                    <field
+                                        name="filter_vendor_account_type"
+                                        options="{'no_create': True, 'no_open': True}"
+                                    />
+                                </group>
+                                <group>
+                                    <field
+                                        name="filter_vendor_currency"
+                                        options="{'no_create': True, 'no_open': True}"
+                                    />
+                                </group>
+                            </group>
+
+                            <group
+                                string="Advanced Customer Filters"
+                                attrs="{'invisible': [('sync_customers', '=', False)]}"
+                            >
+                                <div
+                                    class="alert alert-info mb-2"
+                                    role="alert"
+                                    colspan="2"
+                                >
+                                    <small
+                                    >These filters apply to Bill.com API v3 customer queries</small>
+                                </div>
+                                <group>
+                                    <field
+                                        name="filter_customer_account_type"
+                                        options="{'no_create': True, 'no_open': True}"
+                                    />
+                                </group>
+                                <group />
+                            </group>
+
+                            <group
+                                string="Advanced Bill Filters"
+                                attrs="{'invisible': [('sync_bills', '=', False)]}"
+                            >
+                                <div
+                                    class="alert alert-info mb-2"
+                                    role="alert"
+                                    colspan="2"
+                                >
+                                    <small
+                                    >These filters apply to Bill.com API v3 bill queries</small>
+                                </div>
+                                <group>
+                                    <field
+                                        name="filter_bill_status"
+                                        widget="many2many_tags"
+                                        options="{'no_create': True, 'no_open': True}"
+                                        placeholder="Select payment statuses (leave empty for all)"
+                                    />
+                                    <field
+                                        name="filter_bill_approval_status"
+                                        widget="many2many_tags"
+                                        options="{'no_create': True, 'no_open': True}"
+                                        placeholder="Select approval statuses (leave empty for all)"
+                                    />
+                                </group>
+                                <group />
+                            </group>
+
+                            <group
+                                string="Advanced Invoice Filters"
+                                attrs="{'invisible': [('sync_invoices', '=', False)]}"
+                            >
+                                <div
+                                    class="alert alert-info mb-2"
+                                    role="alert"
+                                    colspan="2"
+                                >
+                                    <small
+                                    >These filters apply to Bill.com API v3 invoice queries</small>
+                                </div>
+                                <group>
+                                    <field
+                                        name="filter_invoice_status"
+                                        widget="many2many_tags"
+                                        options="{'no_create': True, 'no_open': True}"
+                                        placeholder="Select statuses (leave empty for all)"
+                                    />
+                                </group>
+                                <group />
+                            </group>
+
+                            <group
+                                string="Advanced Payment Filters"
+                                attrs="{'invisible': [('sync_payments', '=', False)]}"
+                            >
+                                <div
+                                    class="alert alert-info mb-2"
+                                    role="alert"
+                                    colspan="2"
+                                >
+                                    <small
+                                    >These filters apply to Bill.com API v3 payment queries</small>
+                                </div>
+                                <group>
+                                    <field
+                                        name="filter_payment_status"
+                                        widget="many2many_tags"
+                                        options="{'no_create': True, 'no_open': True}"
+                                        placeholder="Select statuses (leave empty for all)"
+                                    />
+                                </group>
+                                <group />
+                            </group>
                         </page>
 
                         <!-- Tab 5: Advanced Options -->
                         <page string="Advanced" name="advanced">
                             <group string="Processing Options">
                                 <group>
-                                    <field name="process_immediately" widget="boolean_toggle" />
+                                    <field
+                                        name="process_immediately"
+                                        widget="boolean_toggle"
+                                    />
                                     <field
                                         name="batch_size"
                                         attrs="{'invisible': [('process_immediately', '=', False)]}"

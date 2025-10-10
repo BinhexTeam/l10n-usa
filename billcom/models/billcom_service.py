@@ -1897,7 +1897,6 @@ class BillcomService(models.AbstractModel):
             "partner_id": partner.id,
             "bank_id": bank.id,
             # Bill.com specific fields
-            "routing_number": routing_number,
             "billcom_pay_by_type": payment_info.get("payByType"),
             "billcom_pay_by_subtype": payment_info.get("payBySubType", "NONE"),
             "billcom_account_type": bank_account_data.get("type"),
@@ -1905,10 +1904,21 @@ class BillcomService(models.AbstractModel):
             "billcom_last_sync_date": fields.Datetime.now(),
         }
 
-        # Only set account number if not masked (doesn't contain *)
+        # Set aba_routing if available (US bank routing number field)
+        if routing_number:
+            bank_vals["aba_routing"] = routing_number
+
+        # Always set account number - even if masked or missing
+        # acc_number is a required field in res.partner.bank
         is_masked = account_number and "*" in account_number
-        if account_number and not is_masked:
+        if account_number:
+            # Store account number even if masked (with asterisks)
             bank_vals["acc_number"] = account_number
+        else:
+            # If no account number provided, use routing number as placeholder
+            bank_vals["acc_number"] = (
+                f"****{routing_number[-4:]}" if routing_number else "****"
+            )
 
         if existing_bank_account:
             # Update existing bank account

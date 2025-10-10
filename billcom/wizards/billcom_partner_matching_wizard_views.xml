@@ -71,7 +71,11 @@
                         type="object"
                         attrs="{'invisible': [('state', '=', 'draft')]}"
                     />
-                    <field name="state" widget="statusbar" statusbar_visible="draft,review,done" />
+                    <field
+                        name="state"
+                        widget="statusbar"
+                        statusbar_visible="draft,review,done"
+                    />
                 </header>
                 <sheet>
                     <div class="oe_title">
@@ -115,7 +119,8 @@
                                         Only one criterion matches
                                     </li>
                                 </ul>
-                                <p>Click "Find Matches" to analyze all partners without Bill.com ID.</p>
+                                <p
+                                >Click "Find Matches" to analyze all partners without Bill.com ID.</p>
                             </div>
                         </group>
                     </group>
@@ -144,16 +149,51 @@
                                     editable="bottom"
                                 >
                                     <field name="state" invisible="1" />
-                                    <field name="confidence_level" />
-                                    <field name="match_score" />
-                                    <field name="match_details" />
-                                    <field name="odoo_partner_name" />
-                                    <field name="odoo_partner_email" optional="show" />
-                                    <field name="odoo_partner_phone" optional="show" />
-                                    <field name="billcom_partner_name" />
-                                    <field name="billcom_partner_email" optional="show" />
-                                    <field name="billcom_partner_phone" optional="show" />
+                                    <field name="wizard_id" invisible="1" />
+                                    <field name="confidence_level" string="Conf." />
+                                    <field name="match_score" string="Score" />
+                                    <field
+                                        name="match_details"
+                                        string="Match Details"
+                                    />
+
+                                    <!-- Odoo Partner - Editable for manual selection -->
+                                    <field
+                                        name="odoo_partner_id"
+                                        string="Odoo Partner"
+                                        context="{'default_supplier_rank': 1 if parent.partner_type == 'vendor' else 0, 'default_customer_rank': 1 if parent.partner_type == 'customer' else 0}"
+                                        options="{'no_create': True, 'no_quick_create': True}"
+                                    />
+                                    <field
+                                        name="odoo_partner_email"
+                                        string="Odoo Email"
+                                        optional="hide"
+                                    />
+                                    <field
+                                        name="odoo_partner_phone"
+                                        string="Odoo Phone"
+                                        optional="hide"
+                                    />
+
+                                    <!-- Bill.com Partner - Read-only -->
+                                    <field name="billcom_partner_id" invisible="1" />
+                                    <field
+                                        name="billcom_partner_name"
+                                        string="Bill.com Name"
+                                    />
+                                    <field
+                                        name="billcom_partner_email"
+                                        string="Bill.com Email"
+                                        optional="hide"
+                                    />
+                                    <field
+                                        name="billcom_partner_phone"
+                                        string="Bill.com Phone"
+                                        optional="hide"
+                                    />
+
                                     <field name="action" />
+                                    <field name="error_message" optional="hide" />
                                     <button
                                         name="action_apply_link"
                                         string="Link Now"
@@ -174,33 +214,29 @@
                         </page>
                         <page string="High Confidence (3/3)">
                             <field
-                                name="line_ids"
+                                name="high_confidence_line_ids"
                                 nolabel="1"
-                                domain="[('confidence_level', '=', 'high')]"
                                 context="{'tree_view_ref': 'billcom.view_billcom_partner_matching_line_tree'}"
                             />
                         </page>
                         <page string="Medium Confidence (2/3)">
                             <field
-                                name="line_ids"
+                                name="medium_confidence_line_ids"
                                 nolabel="1"
-                                domain="[('confidence_level', '=', 'medium')]"
                                 context="{'tree_view_ref': 'billcom.view_billcom_partner_matching_line_tree'}"
                             />
                         </page>
                         <page string="Low Confidence (1/3)">
                             <field
-                                name="line_ids"
+                                name="low_confidence_line_ids"
                                 nolabel="1"
-                                domain="[('confidence_level', '=', 'low')]"
                                 context="{'tree_view_ref': 'billcom.view_billcom_partner_matching_line_tree'}"
                             />
                         </page>
                         <page string="No Matches">
                             <field
-                                name="line_ids"
+                                name="no_match_line_ids"
                                 nolabel="1"
-                                domain="[('confidence_level', '=', 'none')]"
                                 context="{'tree_view_ref': 'billcom.view_billcom_partner_matching_line_tree'}"
                             />
                         </page>
@@ -211,7 +247,8 @@
                         <div class="alert alert-success" role="alert">
                             <h4>✓ Matching Complete!</h4>
                             <p>Partners have been successfully linked with Bill.com.</p>
-                            <p>You can close this window or start over to process more partners.</p>
+                            <p
+                            >You can close this window or start over to process more partners.</p>
                         </div>
                     </group>
                 </sheet>

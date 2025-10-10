@@ -8,7 +8,7 @@
         <field name="arch" type="xml">
             <!-- Add invisible fields for attrs usage -->
             <xpath expr="//field[@name='vat']" position="after">
-                <field name="customer_rank" invisible="1" />
+                <field name="customer_rank" invisible="0" />
                 <field name="supplier_rank" invisible="0" />
             </xpath>
 
@@ -21,18 +21,37 @@
                     attrs="{'invisible': [('customer_rank', '=', 0), ('supplier_rank', '=', 0)]}"
                 >
                     <group>
+                        <field name="billcom_id" invisible="1" />
+                        <field name="billcom_sync_manual" widget="boolean_toggle" />1
                         <field
                             name="billcom_res_currency_id"
                             options="{'no_create': True}"
                             groups="account.group_account_invoice"
                         />
-                        <field
-                            name="billcom_payment_purpose_id"
-                            options="{'no_create': True}"
-                            groups="account.group_account_invoice"
-                            attrs="{'invisible': [('country_id', '=', False)]}"
+                        <label
+                            for="billcom_payment_purpose_id"
+                            string="Payment Purpose"
+                            class="mt16"
+                            attrs="{'invisible': ['|', ('country_id', '=', False), ('billcom_id', '=', False)]}"
                         />
-                        <field name="billcom_sync_manual" widget="boolean_toggle"/>
+                        <div class="o_row">
+                            <field
+                                name="billcom_payment_purpose_id"
+                                options="{'no_create': True}"
+                                groups="account.group_account_invoice"
+                                attrs="{'invisible': ['|', ('country_id', '=', False), ('billcom_id', '=', False)]}"
+                            />
+                            <button
+                                name="action_fetch_payment_purposes"
+                                type="object"
+                                icon="fa-download"
+                                class="btn-secondary"
+                                attrs="{'invisible': ['|', ('country_id', '=', False), ('billcom_id', '=', False)]}"
+                                help="Fetch available payment purposes from Bill.com based on country and currency"
+                                groups="account.group_account_invoice"
+                            />
+                        </div>
+
                     </group>
                     <group>
 
@@ -59,6 +78,7 @@
                                 decoration-danger="billcom_sync_status == 'sync_failed'"
                                 decoration-info="billcom_sync_status == 'not_synced'"
                             />
+
                             <field
                                 name="billcom_sync_error"
                                 readonly="1"
@@ -73,6 +93,7 @@
                                 attrs="{'invisible': [('is_sync_to_billcom', '=', False)]}"
                                 groups="account.group_account_manager"
                             />
+
                         </group>
                         <group
                             string="Customer"

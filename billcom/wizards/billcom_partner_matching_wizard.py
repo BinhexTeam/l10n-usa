@@ -3,7 +3,8 @@
 
 import logging
 import unicodedata
-from odoo import api, fields, models, _
+
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
@@ -33,6 +34,31 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         "billcom.partner.matching.line",
         "wizard_id",
         string="Matching Lines",
+    )
+    # Filtered line_ids for each confidence level
+    high_confidence_line_ids = fields.One2many(
+        "billcom.partner.matching.line",
+        "wizard_id",
+        string="High Confidence Lines",
+        domain=[("confidence_level", "=", "high")],
+    )
+    medium_confidence_line_ids = fields.One2many(
+        "billcom.partner.matching.line",
+        "wizard_id",
+        string="Medium Confidence Lines",
+        domain=[("confidence_level", "=", "medium")],
+    )
+    low_confidence_line_ids = fields.One2many(
+        "billcom.partner.matching.line",
+        "wizard_id",
+        string="Low Confidence Lines",
+        domain=[("confidence_level", "=", "low")],
+    )
+    no_match_line_ids = fields.One2many(
+        "billcom.partner.matching.line",
+        "wizard_id",
+        string="No Match Lines",
+        domain=[("confidence_level", "=", "none")],
     )
     auto_link_high_confidence = fields.Boolean(
         string="Auto-link matches with 100% confidence (3/3 criteria)",
@@ -101,11 +127,13 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
 
         odoo_partners = self.env["res.partner"].search(domain)
 
+        _logger.info(
+            f"📋 Found {len(odoo_partners)} Odoo {self.partner_type}s without billcom_id to match against"
+        )
+
         if not odoo_partners:
             raise UserError(
-                _(
-                    "No %ss found without Bill.com ID. All partners are already linked."
-                )
+                _("No %ss found without Bill.com ID. All partners are already linked.")
                 % self.partner_type
             )
 
@@ -123,33 +151,50 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
             )
 
         _logger.info(
-            f"Starting matching: {len(odoo_partners)} Odoo partners vs {len(billcom_partners)} Bill.com partners"
+            f"Starting matching: {len(billcom_partners)} Bill.com partners vs {len(odoo_partners)} Odoo partners"
         )
 
-        # Find matches for each Odoo partner
+        # Reverse logic: Find matches for each Bill.com partner against ALL Odoo partners
         matching_lines = []
-        for partner in odoo_partners:
-            best_match = self._find_best_match(partner, billcom_partners)
-            matching_lines.append(
-                {
-                    "wizard_id": self.id,
-                    "odoo_partner_id": partner.id,
-                    "billcom_partner_id": best_match["billcom_id"]
-                    if best_match
-                    else False,
-                    "billcom_partner_name": best_match["name"] if best_match else "",
-                    "billcom_partner_email": best_match["email"] if best_match else "",
-                    "billcom_partner_phone": best_match["phone"] if best_match else "",
-                    "confidence_level": best_match["confidence_level"]
-                    if best_match
-                    else "none",
-                    "match_score": best_match["score"] if best_match else 0,
-                    "match_details": best_match["details"] if best_match else "",
-                    "action": "link"
-                    if best_match and best_match["confidence_level"] == "high"
-                    else "review",
-                }
-            )
+        for billcom_partner in billcom_partners:
+            # Find ALL potential Odoo matches for this Bill.com partner
+            potential_matches = self._find_odoo_matches(billcom_partner, odoo_partners)
+
+            if not potential_matches:
+                # No matches found - create empty line for review
+                matching_lines.append(
+                    {
+                        "wizard_id": self.id,
+                        "odoo_partner_id": False,
+                        "billcom_partner_id": billcom_partner["id"],
+                        "billcom_partner_name": billcom_partner.get("name", ""),
+                        "billcom_partner_email": billcom_partner.get("email", ""),
+                        "billcom_partner_phone": billcom_partner.get("phone", ""),
+                        "confidence_level": "none",
+                        "match_score": 0,
+                        "match_details": "No matches found",
+                        "action": "review",
+                    }
+                )
+            else:
+                # Create a line for each potential Odoo match
+                for match in potential_matches:
+                    matching_lines.append(
+                        {
+                            "wizard_id": self.id,
+                            "odoo_partner_id": match["odoo_id"],
+                            "billcom_partner_id": billcom_partner["id"],
+                            "billcom_partner_name": billcom_partner.get("name", ""),
+                            "billcom_partner_email": billcom_partner.get("email", ""),
+                            "billcom_partner_phone": billcom_partner.get("phone", ""),
+                            "confidence_level": match["confidence_level"],
+                            "match_score": match["score"],
+                            "match_details": match["details"],
+                            "action": "link"
+                            if match["confidence_level"] == "high"
+                            else "review",
+                        }
+                    )
 
         self.line_ids = [(0, 0, line) for line in matching_lines]
 
@@ -182,7 +227,9 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         text = text.lower().strip()
         # Remove accents
         text = (
-            unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("utf-8")
+            unicodedata.normalize("NFKD", text)
+            .encode("ASCII", "ignore")
+            .decode("utf-8")
         )
         # Remove special characters except spaces
         text = "".join(c for c in text if c.isalnum() or c.isspace())
@@ -196,71 +243,107 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
             return ""
         return "".join(c for c in phone if c.isdigit())
 
-    def _find_best_match(self, odoo_partner, billcom_partners):
-        """Find best match for an Odoo partner in Bill.com partners
+    def _find_odoo_matches(self, billcom_partner, odoo_partners):
+        """Find ALL potential Odoo partners that match a Bill.com partner
 
-        Matching criteria (in order):
+        Uses OR logic: finds Odoo partners that match on ANY of these criteria:
         1. Email exact match
         2. Phone exact match (digits only)
-        3. Name normalized match
+        3. Name normalized match (full name comparison)
 
         Confidence levels:
         - High (3/3): All three criteria match
         - Medium (2/3): Two criteria match
         - Low (1/3): One criterion matches
-        - None (0/3): No matches
+
+        Args:
+            billcom_partner: Dict with Bill.com partner data
+            odoo_partners: Recordset of res.partner to search
+
+        Returns:
+            List of match dictionaries, sorted by score (highest first)
         """
-        best_match = None
-        best_score = 0
+        matches = []
 
-        odoo_email = self._normalize_text(odoo_partner.email or "")
-        odoo_phone = self._normalize_phone(odoo_partner.phone or "")
-        odoo_name = self._normalize_text(odoo_partner.name or "")
+        # Normalize Bill.com partner data
+        billcom_email = self._normalize_text(billcom_partner.get("email", ""))
+        billcom_phone = self._normalize_phone(billcom_partner.get("phone", ""))
+        billcom_name = self._normalize_text(billcom_partner.get("name", ""))
 
-        for billcom_partner in billcom_partners:
-            billcom_email = self._normalize_text(billcom_partner.get("email", ""))
-            billcom_phone = self._normalize_phone(billcom_partner.get("phone", ""))
-            billcom_name = self._normalize_text(billcom_partner.get("name", ""))
+        _logger.info(
+            f"🔍 Matching Bill.com partner: {billcom_partner.get('name')} | "
+            f"Normalized: name='{billcom_name}', email='{billcom_email}', phone='{billcom_phone}'"
+        )
 
-            # Calculate matches
-            email_match = bool(odoo_email and billcom_email and odoo_email == billcom_email)
-            phone_match = bool(odoo_phone and billcom_phone and odoo_phone == billcom_phone)
-            name_match = bool(odoo_name and billcom_name and odoo_name == billcom_name)
+        # Search through ALL Odoo partners
+        checked_count = 0
+        for odoo_partner in odoo_partners:
+            checked_count += 1
+            odoo_email = self._normalize_text(odoo_partner.email or "")
+            odoo_phone = self._normalize_phone(odoo_partner.phone or "")
+            odoo_name = self._normalize_text(odoo_partner.name or "")
 
-            # Count matches
-            matches = sum([email_match, phone_match, name_match])
+            # Calculate matches using OR logic
+            email_match = bool(
+                billcom_email and odoo_email and billcom_email == odoo_email
+            )
+            phone_match = bool(
+                billcom_phone and odoo_phone and billcom_phone == odoo_phone
+            )
+            name_match = bool(billcom_name and odoo_name and billcom_name == odoo_name)
 
-            if matches > best_score:
-                best_score = matches
-                match_details = []
-                if email_match:
-                    match_details.append("✓ Email")
-                if phone_match:
-                    match_details.append("✓ Phone")
-                if name_match:
-                    match_details.append("✓ Name")
+            # Debug logging for potential name matches
+            if billcom_name and odoo_name and billcom_name in odoo_name:
+                _logger.info(
+                    f"  🔎 Checking Odoo partner: {odoo_partner.name} (ID: {odoo_partner.id}) | "
+                    f"Normalized: name='{odoo_name}', email='{odoo_email}', phone='{odoo_phone}' | "
+                    f"Matches: name={name_match}, email={email_match}, phone={phone_match}"
+                )
 
-                # Determine confidence level
-                if matches == 3:
-                    confidence = "high"
-                elif matches == 2:
-                    confidence = "medium"
-                elif matches == 1:
-                    confidence = "low"
-                else:
-                    confidence = "none"
+            # Only include if at least one criterion matches
+            if not (email_match or phone_match or name_match):
+                continue
 
-                best_match = {
-                    "billcom_id": billcom_partner["id"],
-                    "name": billcom_partner["name"],
-                    "email": billcom_partner.get("email", ""),
-                    "phone": billcom_partner.get("phone", ""),
-                    "score": matches,
+            # Count matches for confidence level
+            match_count = sum([email_match, phone_match, name_match])
+
+            # Build match details
+            match_details = []
+            if name_match:
+                match_details.append("✓ Name")
+            if email_match:
+                match_details.append("✓ Email")
+            if phone_match:
+                match_details.append("✓ Phone")
+
+            # Determine confidence level
+            if match_count == 3:
+                confidence = "high"
+            elif match_count == 2:
+                confidence = "medium"
+            else:  # match_count == 1
+                confidence = "low"
+
+            matches.append(
+                {
+                    "odoo_id": odoo_partner.id,
+                    "odoo_name": odoo_partner.name,
+                    "odoo_email": odoo_partner.email or "",
+                    "odoo_phone": odoo_partner.phone or "",
+                    "score": match_count,
                     "confidence_level": confidence,
-                    "details": ", ".join(match_details) if match_details else "No matches",
+                    "details": ", ".join(match_details),
                 }
+            )
 
-        return best_match if best_score > 0 else None
+        # Sort by score (highest first), then by name
+        matches.sort(key=lambda x: (-x["score"], x["odoo_name"]))
+
+        _logger.info(
+            f"  ✅ Result: Checked {checked_count} Odoo partners, found {len(matches)} matches"
+        )
+
+        return matches
 
     def action_apply_selected(self):
         """Apply selected links"""
