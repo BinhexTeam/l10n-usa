@@ -142,6 +142,7 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         try:
             result = service._make_request(endpoint, method="GET")
             billcom_partners = result.get("results", [])
+            _logger.info(f"Billcom partners {billcom_partners}")
         except Exception as e:
             raise UserError(_("Error fetching data from Bill.com: %s") % str(e))
 

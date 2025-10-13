@@ -159,10 +159,7 @@ class BillcomPartnerMatchingLine(models.TransientModel):
             try:
                 # Determine partner type
                 service = self.env["billcom.service"].sudo()
-                partner_type = (
-                    "vendor" if line.odoo_partner_id.supplier_rank > 0 else "customer"
-                )
-
+                partner_type = line.wizard_id.partner_type
                 # Fetch complete partner data from Bill.com
                 endpoint = (
                     f"vendors/{line.billcom_partner_id}"
