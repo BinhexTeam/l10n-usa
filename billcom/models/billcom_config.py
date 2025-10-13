@@ -24,12 +24,12 @@ class BillcomConfig(models.Model):
         tracking=True,
     )
     username = fields.Char(string="Username", required=True, tracking=True)
-    password = fields.Char(string="Password", required=True, tracking=True)
+    password = fields.Char(string="Password", required=True)
     user_id = fields.Many2one("res.users", string="User", required=True, tracking=True)
     organization_id = fields.Char(
         string="Organization ID", required=True, tracking=True
     )
-    dev_key = fields.Char(string="Developer Key", required=True, tracking=True)
+    dev_key = fields.Char(string="Developer Key", required=True)
 
     # MFA Configuration
     enable_mfa = fields.Boolean(
@@ -127,7 +127,7 @@ class BillcomConfig(models.Model):
     webhook_url = fields.Char(
         string="Webhook URL",
         compute="_compute_webhook_url",
-        store=False,
+        store=True,
         help="URL where Bill.com will send webhook notifications",
     )
     webhook_subscription_state = fields.Selection(
@@ -164,7 +164,7 @@ class BillcomConfig(models.Model):
     webhook_event_bank_accounts = fields.Boolean(
         string="Bank Account Events",
         default=True,
-        help="Subscribe to bank-account.created, bank-account.updated, bank-account.archived",
+        help="Subscribe to bank-account.created, bank-account.updated",
     )
 
     # API Configuration
@@ -1008,7 +1008,6 @@ class BillcomConfig(models.Model):
                 [
                     "bank-account.created",
                     "bank-account.updated",
-                    "bank-account.archived",
                 ]
             )
 
@@ -1058,7 +1057,6 @@ class BillcomConfig(models.Model):
                 [
                     {"type": "bank-account.created", "version": "1"},
                     {"type": "bank-account.updated", "version": "1"},
-                    {"type": "bank-account.archived", "version": "1"},
                 ]
             )
 

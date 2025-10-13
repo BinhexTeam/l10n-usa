@@ -269,6 +269,7 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         billcom_email = self._normalize_text(billcom_partner.get("email", ""))
         billcom_phone = self._normalize_phone(billcom_partner.get("phone", ""))
         billcom_name = self._normalize_text(billcom_partner.get("name", ""))
+        billcom_short_name = self._normalize_text(billcom_partner.get("shortName", ""))
 
         _logger.info(
             f"🔍 Matching Bill.com partner: {billcom_partner.get('name')} | "
@@ -290,7 +291,10 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
             phone_match = bool(
                 billcom_phone and odoo_phone and billcom_phone == odoo_phone
             )
-            name_match = bool(billcom_name and odoo_name and billcom_name == odoo_name)
+            name_match = bool(
+                (billcom_short_name or billcom_name and odoo_name)
+                and (billcom_name == odoo_name or billcom_short_name == odoo_name)
+            )
 
             # Debug logging for potential name matches
             if billcom_name and odoo_name and billcom_name in odoo_name:

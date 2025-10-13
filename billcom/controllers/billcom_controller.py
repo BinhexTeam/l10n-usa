@@ -86,15 +86,26 @@ class BillComController(http.Controller):
         elif event_type.startswith("vendor."):
             entity_data = data.get("vendor", {})
             entity_id = entity_data.get("id")
-        elif event_type.startswith("payment."):
+        elif event_type.startswith("payment.") or event_type.startswith("autopay."):
             entity_data = data.get("payment", {})
             entity_id = entity_data.get("id")
         elif event_type.startswith("bank-account."):
             entity_data = data.get("bankAccount", {})
             entity_id = entity_data.get("id")
+        elif event_type.startswith("card-account."):
+            entity_data = data.get("cardAccount", {})
+            entity_id = entity_data.get("id")
 
-        if not entity_id:
-            raise ValueError(f"No entity ID found for event type {event_type}")
+        if not entity_id and entity_data:
+            # For some events like payment.failed, entity_id might be in different location
+            # or might not exist (bulk operations, failed operations, etc.)
+            # In these cases, use a combination of event metadata for idempotency
+            entity_id = f"event-{event_id}"
+            _logger.warning(
+                "No entity ID in payload for %s, using event_id: %s",
+                event_type,
+                event_id,
+            )
 
         # Use event_id as idempotency key
         idempotency_key = event_id or f"{event_type}:{entity_id}"
@@ -300,6 +311,7 @@ class BillComController(http.Controller):
         Payment webhook includes complete payment data:
         - payment.updated: Status changes (SCHEDULED, PROCESSED, etc.)
         - payment.failed: Payment creation/processing failures
+        - autopay.failed: Automatic payment failures
 
         Payment Status Values:
         - SCHEDULED: Payment scheduled for processing
@@ -314,6 +326,9 @@ class BillComController(http.Controller):
         if event_type == "payment.failed":
             # Handle payment failure
             self._handle_payment_failed(entity_data)
+        elif event_type == "autopay.failed":
+            # Handle automatic payment failure (similar to payment.failed)
+            self._handle_autopay_failed(entity_data)
         elif event_type == "payment.updated":
             # Handle payment status update using webhook data directly
             self._handle_payment_updated(entity_id, entity_data)
@@ -328,25 +343,285 @@ class BillComController(http.Controller):
         - vendor: Vendor information
         - fundingAccount: Funding account used
         - errors: List of error messages
+
+        This handler updates payment status, creates activities, and posts to chatter
         """
         vendor_info = payment_data.get("vendor", {})
         errors = payment_data.get("errors", [])
         transaction_number = payment_data.get("transactionNumber")
+        bills = payment_data.get("bills", [])
 
         error_messages = [
             f"{err.get('message', 'Unknown error')} ({err.get('code', 'N/A')})"
             for err in errors
         ]
+        error_text = "; ".join(error_messages)
 
         _logger.error(
             "Payment failed for vendor %s (transaction: %s). Errors: %s",
             vendor_info.get("name", "Unknown"),
             transaction_number,
-            "; ".join(error_messages),
+            error_text,
         )
 
-        # TODO: Optionally create activity/log in Odoo for failed payment
-        # Could search for related bills and add message/activity
+        # Find related payments by bill IDs
+        if bills:
+            bill_ids = [bill.get("billId") for bill in bills if bill.get("billId")]
+
+            if bill_ids:
+                # Find bills in Odoo
+                moves = (
+                    request.env["account.move"]
+                    .sudo()
+                    .search(
+                        [
+                            "|",
+                            ("billcom_id", "in", bill_ids),
+                            ("billcom", "in", bill_ids),
+                        ]
+                    )
+                )
+
+                for move in moves:
+                    # Find related payments through reconciled move lines
+                    payments = move.line_ids.filtered(
+                        lambda l: l.account_id.account_type
+                        in ("asset_receivable", "liability_payable")
+                    ).mapped("matched_debit_ids.debit_move_id.payment_id")
+
+                    payments |= move.line_ids.filtered(
+                        lambda l: l.account_id.account_type
+                        in ("asset_receivable", "liability_payable")
+                    ).mapped("matched_credit_ids.credit_move_id.payment_id")
+
+                    # Also check reconciled_bill_ids field if available
+                    if hasattr(move, "payment_id") and move.payment_id:
+                        payments |= move.payment_id
+
+                    for payment in payments.filtered(
+                        lambda p: p.is_sync_to_billcom
+                        and p.billcom_sync_status != "sync_failed"
+                    ):
+                        # Update payment status to failed
+                        payment.with_context(skip_billcom_sync=True).write(
+                            {
+                                "billcom_payment_status": "failed",
+                                "billcom_sync_status": "sync_failed",
+                                "billcom_sync_error": error_text,
+                                "billcom_transaction_number": transaction_number or "",
+                            }
+                        )
+
+                        # Post error message to payment chatter
+                        payment.message_post(
+                            body=f"<p><strong>Bill.com Payment Failed</strong></p>"
+                            f"<p><strong>Vendor:</strong> {vendor_info.get('name', 'Unknown')}</p>"
+                            f"<p><strong>Transaction:</strong> {transaction_number or 'N/A'}</p>"
+                            f"<p><strong>Errors:</strong></p>"
+                            f"<ul>{''.join([f'<li>{msg}</li>' for msg in error_messages])}</ul>"
+                            f"<p><em>Please review and retry the payment or contact Bill.com support.</em></p>",
+                            message_type="notification",
+                            subtype_xmlid="mail.mt_note",
+                        )
+
+                        # Create activity for payment owner or accounting manager
+                        activity_user = payment.create_uid
+                        if not activity_user:
+                            # Fallback to first user in Invoicing group
+                            invoicing_group = request.env.ref(
+                                "account.group_account_invoice",
+                                raise_if_not_found=False,
+                            )
+                            if invoicing_group and invoicing_group.users:
+                                activity_user = invoicing_group.users[0]
+
+                        if activity_user:
+                            try:
+                                payment.activity_schedule(
+                                    "mail.mail_activity_data_warning",
+                                    summary=f"Payment failed: {vendor_info.get('name', 'Unknown')}",
+                                    note=f"Bill.com payment failed with transaction number {transaction_number or 'N/A'}.\n\n"
+                                    f"Errors:\n{error_text}\n\n"
+                                    f"Please review the payment and retry or contact Bill.com support.",
+                                    user_id=activity_user.id,
+                                )
+                                _logger.info(
+                                    "Created activity for failed payment %s (user: %s)",
+                                    payment.name,
+                                    activity_user.name,
+                                )
+                            except Exception as e:
+                                _logger.warning(
+                                    "Could not create activity for failed payment %s: %s",
+                                    payment.name,
+                                    str(e),
+                                )
+
+                        _logger.info(
+                            "Updated payment %s status to failed (Bill: %s)",
+                            payment.name,
+                            move.name,
+                        )
+
+                    # Also post message to bill
+                    move.message_post(
+                        body=f"<p><strong>Bill.com Payment Failed</strong></p>"
+                        f"<p><strong>Transaction:</strong> {transaction_number or 'N/A'}</p>"
+                        f"<p><strong>Errors:</strong></p>"
+                        f"<ul>{''.join([f'<li>{msg}</li>' for msg in error_messages])}</ul>",
+                        message_type="notification",
+                        subtype_xmlid="mail.mt_note",
+                    )
+
+        else:
+            _logger.warning(
+                "No bill IDs provided in payment.failed webhook for transaction %s",
+                transaction_number,
+            )
+
+    def _handle_autopay_failed(self, payment_data):
+        """Handle autopay.failed webhook
+
+        Autopay failed has similar structure to payment.failed:
+        - bills: List of bills in the failed autopay request
+        - vendor: Vendor information
+        - errors: List of error messages
+
+        Autopay failures are treated similarly to payment failures but with
+        specific messaging about the automatic payment feature.
+        """
+        vendor_info = payment_data.get("vendor", {})
+        errors = payment_data.get("errors", [])
+        transaction_number = payment_data.get("transactionNumber")
+        bills = payment_data.get("bills", [])
+
+        error_messages = [
+            f"{err.get('message', 'Unknown error')} ({err.get('code', 'N/A')})"
+            for err in errors
+        ]
+        error_text = "; ".join(error_messages)
+
+        _logger.error(
+            "AutoPay failed for vendor %s (transaction: %s). Errors: %s",
+            vendor_info.get("name", "Unknown"),
+            transaction_number,
+            error_text,
+        )
+
+        # Find related payments by bill IDs (same logic as payment.failed)
+        if bills:
+            bill_ids = [bill.get("billId") for bill in bills if bill.get("billId")]
+
+            if bill_ids:
+                # Find bills in Odoo
+                moves = (
+                    request.env["account.move"]
+                    .sudo()
+                    .search(
+                        [
+                            "|",
+                            ("billcom_id", "in", bill_ids),
+                            ("billcom", "in", bill_ids),
+                        ]
+                    )
+                )
+
+                for move in moves:
+                    # Find related payments
+                    payments = move.line_ids.filtered(
+                        lambda l: l.account_id.account_type
+                        in ("asset_receivable", "liability_payable")
+                    ).mapped("matched_debit_ids.debit_move_id.payment_id")
+
+                    payments |= move.line_ids.filtered(
+                        lambda l: l.account_id.account_type
+                        in ("asset_receivable", "liability_payable")
+                    ).mapped("matched_credit_ids.credit_move_id.payment_id")
+
+                    if hasattr(move, "payment_id") and move.payment_id:
+                        payments |= move.payment_id
+
+                    for payment in payments.filtered(
+                        lambda p: p.is_sync_to_billcom
+                        and p.billcom_sync_status != "sync_failed"
+                    ):
+                        # Update payment status to failed
+                        payment.with_context(skip_billcom_sync=True).write(
+                            {
+                                "billcom_payment_status": "failed",
+                                "billcom_sync_status": "sync_failed",
+                                "billcom_sync_error": f"AutoPay Failed: {error_text}",
+                                "billcom_transaction_number": transaction_number or "",
+                            }
+                        )
+
+                        # Post error message to payment chatter (with AutoPay context)
+                        payment.message_post(
+                            body=f"<p><strong>Bill.com AutoPay Failed</strong></p>"
+                            f"<p><strong>Vendor:</strong> {vendor_info.get('name', 'Unknown')}</p>"
+                            f"<p><strong>Transaction:</strong> {transaction_number or 'N/A'}</p>"
+                            f"<p><strong>Errors:</strong></p>"
+                            f"<ul>{''.join([f'<li>{msg}</li>' for msg in error_messages])}</ul>"
+                            f"<p><em>Automatic payment failed. Please review autopay settings "
+                            f"or manually process the payment.</em></p>",
+                            message_type="notification",
+                            subtype_xmlid="mail.mt_note",
+                        )
+
+                        # Create activity for payment owner
+                        activity_user = payment.create_uid
+                        if not activity_user:
+                            invoicing_group = request.env.ref(
+                                "account.group_account_invoice",
+                                raise_if_not_found=False,
+                            )
+                            if invoicing_group and invoicing_group.users:
+                                activity_user = invoicing_group.users[0]
+
+                        if activity_user:
+                            try:
+                                payment.activity_schedule(
+                                    "mail.mail_activity_data_warning",
+                                    summary=f"AutoPay failed: {vendor_info.get('name', 'Unknown')}",
+                                    note=f"Bill.com automatic payment failed (transaction: {transaction_number or 'N/A'}).\n\n"
+                                    f"Errors:\n{error_text}\n\n"
+                                    f"Please review autopay configuration or manually process the payment.",
+                                    user_id=activity_user.id,
+                                )
+                                _logger.info(
+                                    "Created activity for failed autopay %s (user: %s)",
+                                    payment.name,
+                                    activity_user.name,
+                                )
+                            except Exception as e:
+                                _logger.warning(
+                                    "Could not create activity for failed autopay %s: %s",
+                                    payment.name,
+                                    str(e),
+                                )
+
+                        _logger.info(
+                            "Updated payment %s status to failed (AutoPay, Bill: %s)",
+                            payment.name,
+                            move.name,
+                        )
+
+                    # Post message to bill
+                    move.message_post(
+                        body=f"<p><strong>Bill.com AutoPay Failed</strong></p>"
+                        f"<p><strong>Transaction:</strong> {transaction_number or 'N/A'}</p>"
+                        f"<p><strong>Errors:</strong></p>"
+                        f"<ul>{''.join([f'<li>{msg}</li>' for msg in error_messages])}</ul>"
+                        f"<p><em>Automatic payment failed. Manual payment may be required.</em></p>",
+                        message_type="notification",
+                        subtype_xmlid="mail.mt_note",
+                    )
+
+        else:
+            _logger.warning(
+                "No bill IDs provided in autopay.failed webhook for transaction %s",
+                transaction_number,
+            )
 
     def _handle_payment_updated(self, entity_id, payment_data):
         """Handle payment.updated webhook
@@ -410,6 +685,72 @@ class BillComController(http.Controller):
                 entity_id,
                 payment_status,
             )
+
+    def _handle_card_account_webhook(self, event_type, entity_id, entity_data, config):
+        """Handle card-account-related webhook events
+
+        Card account webhook includes (for BILL Spend Cards):
+        - id: Card account ID
+        - status: Status of the card account
+        - type: Card type
+        - cardNumber: Masked card number (last 4 digits)
+        - cardholder: Name on card
+        - expirationDate: Card expiration date
+        - default settings: Default for payables/receivables
+
+        Events:
+        - card-account.created: New card account added
+        - card-account.updated: Card account modified (status, defaults, etc.)
+        """
+        card_account_id = entity_data.get("id")
+        status = entity_data.get("status")
+        card_number = entity_data.get("cardNumber", "N/A")
+        cardholder = entity_data.get("cardholder", "Unknown")
+        expiration = entity_data.get("expirationDate", "N/A")
+        default_settings = entity_data.get("default", {})
+
+        _logger.info(
+            "Card Account webhook - Event: %s, ID: %s, Status: %s, Cardholder: %s, Card: %s",
+            event_type,
+            card_account_id,
+            status,
+            cardholder,
+            card_number,
+        )
+
+        if event_type == "card-account.created":
+            _logger.info(
+                "New card account created - Cardholder: %s, Card: %s, Expires: %s",
+                cardholder,
+                card_number,
+                expiration,
+            )
+
+        elif event_type == "card-account.updated":
+            _logger.info(
+                "Card account %s updated - Status: %s, Cardholder: %s",
+                card_account_id,
+                status,
+                cardholder,
+            )
+
+            # Log default settings changes
+            if default_settings.get("payables"):
+                _logger.info(
+                    "Card account %s set as DEFAULT for PAYABLES (AP)", card_account_id
+                )
+            if default_settings.get("receivables"):
+                _logger.info(
+                    "Card account %s set as DEFAULT for RECEIVABLES (AR)",
+                    card_account_id,
+                )
+
+        # TODO: Optionally sync to Odoo
+        # This would require:
+        # 1. Create billcom.card.account model to track cards
+        # 2. Store card account ID, masked number, status
+        # 3. Link to company/user
+        # 4. Track default settings
 
     def _handle_bank_account_webhook(self, event_type, entity_id, entity_data, config):
         """Handle bank-account-related webhook events
@@ -486,14 +827,6 @@ class BillComController(http.Controller):
                     bank_account_id,
                 )
 
-        elif event_type == "bank-account.archived":
-            _logger.info(
-                "Bank account %s archived - %s at %s",
-                bank_account_id,
-                name_on_account,
-                bank_name,
-            )
-
         # TODO: Optionally sync to Odoo res.partner.bank
         # This would require:
         # 1. Find/create partner bank account
@@ -537,15 +870,16 @@ class BillComController(http.Controller):
 
             # Validate webhook signature if secret is configured
             signature_valid = True
-            # if config.webhook_secret:
-            #     signature = request.httprequest.headers.get("X-Bill-Signature")
-            #     payload = request.httprequest.get_data()
-            #     signature_valid = self._validate_webhook_signature(
-            #         payload, signature, config.webhook_secret
-            #     )
-            #     if not signature_valid:
-            #         _logger.error("Invalid webhook signature")
-            #         return {"success": False, "error": "Invalid signature"}
+            if config.webhook_secret:
+                # Bill.com uses x-bill-sha-signature header (official documentation)
+                signature = request.httprequest.headers.get("x-bill-sha-signature")
+                payload = request.httprequest.get_data()
+                signature_valid = self._validate_webhook_signature(
+                    payload, signature, config.webhook_secret
+                )
+                if not signature_valid:
+                    _logger.error("Invalid webhook signature from Bill.com")
+                    return {"success": False, "error": "Invalid signature"}
 
             # Check for idempotency - prevent duplicate processing
             webhook_log_model = request.env["billcom.webhook.log"].sudo()
@@ -581,12 +915,16 @@ class BillComController(http.Controller):
                 self._handle_vendor_webhook(
                     event_type, entity_id, webhook_info["entity_data"], config
                 )
-            elif event_type.startswith("payment."):
+            elif event_type.startswith("payment.") or event_type.startswith("autopay."):
                 self._handle_payment_webhook(
                     event_type, entity_id, webhook_info["entity_data"], config
                 )
             elif event_type.startswith("bank-account."):
                 self._handle_bank_account_webhook(
+                    event_type, entity_id, webhook_info["entity_data"], config
+                )
+            elif event_type.startswith("card-account."):
+                self._handle_card_account_webhook(
                     event_type, entity_id, webhook_info["entity_data"], config
                 )
             else:

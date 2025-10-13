@@ -3520,14 +3520,19 @@ class BillcomService(models.AbstractModel):
             _logger.info("Bulk payment response received: %s", result)
 
             # Process results
+            # Response format: list of payment results, each with billId and payment details
             if result and isinstance(result, list):
                 success_count = 0
                 error_count = 0
                 errors = []
 
-                for idx, payment_result in enumerate(result):
-                    payment = payment_mapping.get(idx)
+                for payment_result in result:
+                    # Get the bill ID to find corresponding payment
+                    bill_id = payment_result.get("billId")
+                    payment = payment_mapping.get(bill_id)
+
                     if not payment:
+                        _logger.warning("No payment found for billId: %s", bill_id)
                         continue
 
                     if payment_result.get("id"):
@@ -3567,21 +3572,23 @@ class BillcomService(models.AbstractModel):
                             body=f"<p><strong>Bill.com Bulk Payment Created</strong></p>"
                             f"<ul>"
                             f"<li>Bill.com ID: {payment_result.get('id')}</li>"
+                            f"<li>Bill ID: {bill_id}</li>"
                             f"<li>Status: {payment_result.get('singleStatus')}</li>"
                             f"<li>Confirmation #: {payment_result.get('confirmationNumber', 'N/A')}</li>"
                             f"<li>Transaction #: {payment_result.get('transactionNumber', 'N/A')}</li>"
-                            f"<li>Bulk Request: {success_count}/{len(payments_data)}</li>"
+                            f"<li>Bulk Request: {success_count}/{len(payment_items)}</li>"
                             f"</ul>",
                             message_type="notification",
                             subtype_xmlid="mail.mt_note",
                         )
 
                         _logger.info(
-                            "Bulk payment success [%d/%d]: %s - Bill.com ID: %s",
+                            "Bulk payment success [%d/%d]: %s - Bill.com ID: %s (Bill: %s)",
                             success_count,
-                            len(payments_data),
+                            len(payment_items),
                             payment.name,
                             payment_result.get("id"),
+                            bill_id,
                         )
                     else:
                         # Error
@@ -3599,10 +3606,11 @@ class BillcomService(models.AbstractModel):
                         )
 
                         _logger.error(
-                            "Bulk payment error [%d/%d]: %s - Error: %s",
+                            "Bulk payment error [%d/%d]: %s (Bill: %s) - Error: %s",
                             error_count,
-                            len(payments_data),
+                            len(payment_items),
                             payment.name,
+                            bill_id,
                             error_msg,
                         )
 
