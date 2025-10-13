@@ -228,8 +228,7 @@
                                     <field
                                         name="webhook_url"
                                         widget="CopyClipboardURL"
-                                        readonly="1"
-                                        attrs="{'invisible': [('enable_webhooks', '=', False)]}"
+                                        attrs="{'readonly':[('environment', '=', 'production')], 'invisible': [('enable_webhooks', '=', False)]}"
                                     />
                                     <field
                                         name="webhook_subscription_state"

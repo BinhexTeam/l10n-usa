@@ -25,8 +25,12 @@ class AccountMove(models.Model):
         string="Bill.com Invoice Number",
     )
 
-    def _prepare_bill_data(self):
-        """Prepare bill data for Bill.com API"""
+    def _prepare_bill_data(self, for_bulk=False):
+        """Prepare bill data for Bill.com API
+
+        Args:
+            for_bulk: If True, includes additional fields required for bulk endpoint
+        """
         self.ensure_one()
         if not self.is_sync_to_billcom or not self.partner_id.is_sync_to_billcom:
             return False
@@ -62,7 +66,6 @@ class AccountMove(models.Model):
             lines.append(line_data)
 
         # Build bill data according to Bill.com API v3 format
-        # Only include required fields - API calculates amount and assigns paymentStatus
         bill_data = {
             "vendorId": self.partner_id.billcom_id or self.partner_id.billcom,
             "billLineItems": lines,
@@ -77,6 +80,15 @@ class AccountMove(models.Model):
         # Add dueDate if available
         if self.invoice_date_due:
             bill_data["dueDate"] = self.invoice_date_due.isoformat()
+
+        # For bulk endpoint, add required fields
+        if for_bulk:
+            billcom_id = self.billcom_id or self.billcom
+            if not billcom_id:
+                return False  # Bulk only supports existing bills
+
+            bill_data["id"] = billcom_id
+            bill_data["archived"] = False  # Default to not archived
 
         return bill_data
 
@@ -181,7 +193,12 @@ class AccountMove(models.Model):
             return None
 
     def button_sync_to_billcom(self):
-        """Sync document to Bill.com"""
+        """Sync document(s) to Bill.com - supports single and bulk operations"""
+        # Handle multiple records with bulk endpoint
+        if len(self) > 1:
+            return self._sync_bulk_to_billcom()
+
+        # Single record sync
         self.ensure_one()
 
         if not self.is_sync_to_billcom or not self.partner_id.is_sync_to_billcom:
@@ -314,6 +331,270 @@ class AccountMove(models.Model):
             raise UserError(
                 _("Failed to sync document to Bill.com:\n\n%s") % friendly_message
             ) from e
+
+    def _sync_bulk_to_billcom(self):
+        """Sync multiple documents to Bill.com
+
+        - Bills (in_invoice) with billcom_id: Use bulk endpoint for updates
+        - Bills (in_invoice) without billcom_id: Create individually
+        - Invoices (out_invoice): Always sync individually (no bulk support)
+        """
+        from odoo.exceptions import UserError
+
+        # Separate bills and invoices
+        bills = self.filtered(lambda m: m.move_type == "in_invoice")
+        invoices = self.filtered(lambda m: m.move_type == "out_invoice")
+
+        total_success = 0
+        total_errors = 0
+
+        # Process invoices individually (no bulk support)
+        if invoices:
+            _logger.info(
+                "Syncing %d invoice(s) individually (bulk not supported for invoices)...",
+                len(invoices),
+            )
+            for invoice in invoices:
+                try:
+                    invoice.button_sync_to_billcom()
+                    total_success += 1
+                except Exception as e:
+                    total_errors += 1
+                    _logger.error(
+                        "Error syncing invoice %s: %s", invoice.name, str(e)
+                    )
+
+        if not bills:
+            # Only invoices were processed
+            if total_errors > 0:
+                raise UserError(
+                    _(
+                        "Invoice sync completed with errors:\n\n"
+                        "✓ Succeeded: %d\n"
+                        "✗ Failed: %d"
+                    )
+                    % (total_success, total_errors)
+                )
+            return True
+
+        # Filter bills that should be synced
+        bills_to_sync = bills.filtered(
+            lambda b: b.is_sync_to_billcom and b.partner_id.is_sync_to_billcom
+        )
+
+        if not bills_to_sync:
+            if invoices:
+                # Already processed invoices
+                return True
+            raise UserError(_("No documents selected for synchronization to Bill.com"))
+
+        # Separate existing bills (for bulk update) from new bills (for individual creation)
+        existing_bills = bills_to_sync.filtered(
+            lambda b: b.billcom_id or b.billcom
+        )
+        new_bills = bills_to_sync - existing_bills
+
+        _logger.info(
+            "Processing %d bill(s): %d existing (bulk), %d new (individual)",
+            len(bills_to_sync),
+            len(existing_bills),
+            len(new_bills),
+        )
+
+        # Process new bills individually
+        if new_bills:
+            _logger.info("Creating %d new bill(s) individually...", len(new_bills))
+            for bill in new_bills:
+                try:
+                    bill.button_sync_to_billcom()
+                    total_success += 1
+                except Exception as e:
+                    total_errors += 1
+                    _logger.error("Error creating bill %s: %s", bill.name, str(e))
+
+        # Process existing bills in bulk
+        if existing_bills:
+            try:
+                bulk_success, bulk_errors = self._sync_existing_bills_bulk(existing_bills)
+                total_success += bulk_success
+                total_errors += bulk_errors
+            except Exception as e:
+                _logger.error("Error in bulk update: %s", str(e))
+                total_errors += len(existing_bills)
+
+        # Summary notification
+        _logger.info(
+            "Sync completed: %d succeeded, %d failed", total_success, total_errors
+        )
+
+        if total_errors > 0:
+            raise UserError(
+                _(
+                    "Sync completed with errors:\n\n"
+                    "✓ Succeeded: %d\n"
+                    "✗ Failed: %d\n\n"
+                    "Check individual document notes for details."
+                )
+                % (total_success, total_errors)
+            )
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Sync Successful"),
+                "message": _("Successfully synced %d document(s) to Bill.com")
+                % total_success,
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def _sync_existing_bills_bulk(self, bills):
+        """Sync existing bills using bulk endpoint
+
+        Args:
+            bills: Recordset of bills with billcom_id (existing in Bill.com)
+
+        Returns:
+            tuple: (success_count, error_count)
+        """
+        from odoo.exceptions import UserError
+
+        _logger.info("Starting bulk update of %d existing bill(s)", len(bills))
+
+        # Prepare bulk data with required fields
+        bulk_data = []
+        bill_mapping = {}  # Map array index to bill record
+
+        for idx, bill in enumerate(bills):
+            data = bill._prepare_bill_data(for_bulk=True)
+            if data:
+                bulk_data.append(data)
+                bill_mapping[idx] = bill
+            else:
+                _logger.warning(
+                    "Bill %s skipped from bulk (missing billcom_id or invalid data)",
+                    bill.name,
+                )
+
+        if not bulk_data:
+            _logger.warning("No valid bill data for bulk update")
+            return (0, len(bills))
+
+        try:
+            # Make bulk request
+            _logger.info("Sending %d bill(s) to Bill.com bulk endpoint", len(bulk_data))
+            results = self.env["billcom.service"]._make_request(
+                "bills/bulk", method="POST", data=bulk_data
+            )
+
+            if not results or not isinstance(results, list):
+                _logger.error(
+                    "Unexpected response from bulk API. Expected list, got: %s",
+                    type(results),
+                )
+                return (0, len(bulk_data))
+
+            # Process results
+            success_count = 0
+            error_count = 0
+
+            for idx, result in enumerate(results):
+                bill = bill_mapping.get(idx)
+                if not bill:
+                    continue
+
+                try:
+                    if result and result.get("id"):
+                        # Successful sync
+                        bill.with_context(skip_billcom_sync=True).write(
+                            {
+                                "billcom": result.get("id"),
+                                "billcom_id": result.get("id"),
+                                "last_sync_date": fields.Datetime.now(),
+                                "billcom_sync_status": "synced",
+                                "billcom_sync_error": False,
+                            }
+                        )
+
+                        bill.message_post(
+                            body=f"<p><strong>Bill.com Bulk Update Successful</strong></p>"
+                            f"<ul>"
+                            f"<li>Bill.com ID: {result.get('id')}</li>"
+                            f"<li>Document Number: {bill.name}</li>"
+                            f"</ul>",
+                            message_type="notification",
+                            subtype_xmlid="mail.mt_note",
+                        )
+
+                        success_count += 1
+                        _logger.info(
+                            "Successfully updated bill %s via bulk", bill.name
+                        )
+                    else:
+                        # Failed sync
+                        error_msg = f"No ID in bulk response: {result}"
+                        bill.with_context(skip_billcom_sync=True).write(
+                            {
+                                "billcom_sync_status": "sync_failed",
+                                "billcom_sync_error": error_msg,
+                            }
+                        )
+
+                        bill.message_post(
+                            body=f"<p><strong>Bill.com Bulk Update Failed</strong></p>"
+                            f"<p>No ID returned in response</p>"
+                            f"<p><em>Response: {result}</em></p>",
+                            message_type="notification",
+                            subtype_xmlid="mail.mt_note",
+                        )
+
+                        error_count += 1
+                        _logger.error("Failed to update bill %s: %s", bill.name, error_msg)
+
+                except Exception as e:
+                    error_msg = str(e)
+                    bill.with_context(skip_billcom_sync=True).write(
+                        {
+                            "billcom_sync_status": "sync_failed",
+                            "billcom_sync_error": error_msg,
+                        }
+                    )
+
+                    bill.message_post(
+                        body=f"<p><strong>Bill.com Bulk Update Error</strong></p>"
+                        f"<p>{error_msg}</p>",
+                        message_type="notification",
+                        subtype_xmlid="mail.mt_note",
+                    )
+
+                    error_count += 1
+                    _logger.error(
+                        "Error processing bulk result for bill %s: %s",
+                        bill.name,
+                        error_msg,
+                    )
+
+            return (success_count, error_count)
+
+        except Exception as e:
+            error_detail = str(e)
+            service = self.env["billcom.service"]
+            friendly_message = service._extract_friendly_error(e)
+
+            _logger.error("Error in bulk update: %s", error_detail)
+
+            # Mark all bills as failed
+            for bill in bills:
+                bill.with_context(skip_billcom_sync=True).write(
+                    {
+                        "billcom_sync_status": "sync_failed",
+                        "billcom_sync_error": friendly_message,
+                    }
+                )
+
+            return (0, len(bills))
 
     @api.model
     def _sync_documents_cron(self):

@@ -28,11 +28,6 @@ class ResPartner(models.Model):
         default="pending",
         string="Bill.com Sync State",
     )
-    billcom_sync_manual = fields.Boolean(
-        string="Manual Sync Required",
-        default=False,
-        help="Indicates if manual sync is required due to previous errors",
-    )
 
     billcom_payment_purpose_id = fields.Many2one(
         "billcom.payment.purpose",

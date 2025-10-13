@@ -63,6 +63,7 @@
                             <field name="is_sync_to_billcom" />
                             <field
                                 name="billcom_id"
+                                readonly="1"
                                 attrs="{'readonly': [('billcom_sync_manual', '=', False)], 'invisible': [('billcom_id', '=', False),('billcom_sync_manual', '=', False)]}"
                             />
                             <field
@@ -103,7 +104,6 @@
                             <field name="is_sync_to_billcom" />
                             <field
                                 name="billcom_id"
-                                readonly="1"
                                 attrs="{'invisible': [('billcom_id', '=', False),('billcom_sync_manual', '=', False)]}"
                             />
                             <field
