@@ -1164,16 +1164,8 @@ class BillcomService(models.AbstractModel):
                             "move_id": bill.id,
                             "name": line_data.get("description", ""),
                             "quantity": line_data.get("quantity", 1.0),
-                            "price_unit": line_data.get("price", 0.0),
+                            "price_unit": line_data.get("amount", 0.0),
                         }
-
-                        # Find product if available
-                        if line_data.get("itemId"):
-                            product = self.env["product.product"].search(
-                                [("billcom", "=", line_data["itemId"])], limit=1
-                            )
-                            if product:
-                                line_vals["product_id"] = product.id
 
                         self.env["account.move.line"].create(line_vals)
 
@@ -1308,15 +1300,8 @@ class BillcomService(models.AbstractModel):
                             "name": line_data.get("description", ""),
                             "quantity": line_data.get("quantity", 1.0),
                             "price_unit": line_data.get("price", 0.0),
+                            "tax_ids": [(6, 0, [])],  # No taxes by default
                         }
-
-                        # Find product if available
-                        if line_data.get("itemId"):
-                            product = self.env["product.product"].search(
-                                [("billcom", "=", line_data["itemId"])], limit=1
-                            )
-                            if product:
-                                line_vals["product_id"] = product.id
 
                         self.env["account.move.line"].create(line_vals)
 
@@ -2133,6 +2118,7 @@ class BillcomService(models.AbstractModel):
                     "name": line_description,
                     "quantity": 1.0,
                     "price_unit": line_amount,
+                    "tax_ids": [(6, 0, [])],  # No taxes by default
                 }
 
                 # Set account (use default if not specified)
@@ -2316,13 +2302,14 @@ class BillcomService(models.AbstractModel):
 
             for line in invoice_line_items:
                 line_description = line.get("description", "Invoice Line Item")
-                line_amount = line.get("amount", 0.0)
+                line_price = line.get("price", 0.0)
                 line_quantity = line.get("quantity", 1.0)
 
                 line_vals = {
                     "name": line_description,
                     "quantity": line_quantity,
-                    "price_unit": line_amount,
+                    "price_unit": line_price,
+                    "tax_ids": [(6, 0, [])],  # No taxes by default
                 }
 
                 # Set account (use default if not specified)
@@ -3294,3 +3281,362 @@ class BillcomService(models.AbstractModel):
             if existing_partner:
                 existing_partner.billcom_sync_state = "error"
             return False
+
+    @api.model
+    def create_bulk_payments(self, payments):
+        """Create multiple payments in Bill.com with a single API request
+
+        Bulk payments follow these rules from Bill.com API v3:
+        - Can pay up to 50 bills with one POST /v3/payments/bulk request
+        - All bill payments must succeed or the entire request fails
+        - All payments must use the SAME funding account and process date
+        - Can only pay existing bills (billId required, createBill not supported)
+
+        Payload format:
+        {
+            "processDate": "2025-12-16",
+            "fundingAccount": {
+                "type": "BANK_ACCOUNT",
+                "id": "00000000000000000000000"
+            },
+            "payments": [
+                {"billId": "bill_id_1", "amount": 100.00},
+                {"billId": "bill_id_2", "amount": 200.00}
+            ]
+        }
+
+        Args:
+            payments: recordset of account.payment records to process in bulk
+
+        Returns:
+            dict: {
+                'success': True/False,
+                'results': list of payment results from Bill.com,
+                'errors': list of error messages if any
+            }
+        """
+        if not payments:
+            return {"success": False, "errors": ["No payments provided"]}
+
+        # Validate payment count (Bill.com limit: 50 bills per request)
+        if len(payments) > 50:
+            raise UserError(
+                _(
+                    "Bill.com bulk payment limit is 50 bills per request. "
+                    "You selected %d payments. Please reduce the selection."
+                )
+                % len(payments)
+            )
+
+        _logger.info("=" * 80)
+        _logger.info("BULK PAYMENT REQUEST - Processing %d payments", len(payments))
+        _logger.info("=" * 80)
+
+        # Validate and extract common funding account and process date
+        # All payments in bulk request must use the SAME funding account and process date
+        first_payment = payments[0]
+        common_funding_type = None
+        common_funding_id = None
+        common_process_date = None
+
+        # Get funding account from first payment
+        funding_account = False
+        if (
+            first_payment.journal_id.bank_account_id
+            and first_payment.journal_id.bank_account_id.billcom_funding_account_id
+        ):
+            funding_account = (
+                first_payment.journal_id.bank_account_id.billcom_funding_account_id
+            )
+            common_funding_id = funding_account.billcom_id
+
+        # If no funding account configured, try to get default
+        if not common_funding_id:
+            funding_account = self.env["billcom.funding.account"].search(
+                [
+                    ("is_default_payables", "=", True),
+                    ("status", "=", "VERIFIED"),
+                    ("company_id", "=", self.env.company.id),
+                ],
+                limit=1,
+            )
+            if funding_account:
+                common_funding_id = funding_account.billcom_id
+
+        common_funding_type = (
+            first_payment.billcom_funding_account_type or "BANK_ACCOUNT"
+        )
+
+        # Validate funding account
+        if common_funding_type != "WALLET" and not common_funding_id:
+            return {
+                "success": False,
+                "errors": [
+                    "No Bill.com funding account configured. "
+                    "Please link a funding account in the journal's bank account or "
+                    "configure a default payables funding account."
+                ],
+            }
+
+        # Determine common process date
+        requires_process_date = common_funding_type in ["WALLET", "AP_CARD"]
+
+        if requires_process_date or not first_payment.is_process_date_sync:
+            if first_payment.billcom_process_date:
+                date_obj = first_payment.billcom_process_date
+            else:
+                date_obj = fields.Date.today()
+
+            # Convert to string format "YYYY-MM-DD"
+            if isinstance(date_obj, str):
+                common_process_date = date_obj
+            elif hasattr(date_obj, "strftime"):
+                common_process_date = date_obj.strftime("%Y-%m-%d")
+            else:
+                common_process_date = fields.Date.to_string(date_obj)
+
+            # Validate format
+            if not common_process_date or not isinstance(common_process_date, str):
+                return {
+                    "success": False,
+                    "errors": [
+                        f"Invalid process date format. Expected YYYY-MM-DD string, got: {common_process_date}"
+                    ],
+                }
+        elif requires_process_date:
+            return {
+                "success": False,
+                "errors": [
+                    f"Process date is required for {common_funding_type} funding type "
+                    "but was not set correctly."
+                ],
+            }
+
+        _logger.info(
+            "Common Funding Account: %s (type: %s)",
+            common_funding_id,
+            common_funding_type,
+        )
+        _logger.info("Common Process Date: %s", common_process_date)
+
+        # Prepare list of payment items (billId + amount only)
+        payment_items = []
+        payment_mapping = {}  # Map bill_id to payment record for result processing
+
+        for idx, payment in enumerate(payments):
+            # Validate payment is ready for sync
+            if (
+                not payment.is_sync_to_billcom
+                or not payment.partner_id.is_sync_to_billcom
+            ):
+                return {
+                    "success": False,
+                    "errors": [
+                        f"Payment {payment.name} or vendor {payment.partner_id.name} "
+                        "is not marked for Bill.com synchronization"
+                    ],
+                }
+
+            if payment.payment_type != "outbound" or payment.partner_type != "supplier":
+                return {
+                    "success": False,
+                    "errors": [
+                        f"Payment {payment.name} is not a vendor payment "
+                        "(must be outbound supplier payment)"
+                    ],
+                }
+
+            # Get linked bill ID - REQUIRED for bulk payments
+            bill_id = False
+            if payment.reconciled_bill_ids:
+                for bill in payment.reconciled_bill_ids:
+                    if bill.billcom_id or bill.billcom:
+                        bill_id = bill.billcom_id or bill.billcom
+                        break
+
+            # Bulk payments REQUIRE existing bill IDs
+            if not bill_id:
+                return {
+                    "success": False,
+                    "errors": [
+                        f"Payment {payment.name} does not have a linked bill with Bill.com ID. "
+                        "Bulk payments can only pay existing bills. "
+                        "Please sync the bill to Bill.com first or use single payment creation."
+                    ],
+                }
+
+            # Build simple payment item for bulk request (only billId and amount)
+            payment_item = {
+                "billId": bill_id,
+                "amount": payment.amount,
+            }
+
+            payment_items.append(payment_item)
+            payment_mapping[bill_id] = payment  # Map by bill_id for result processing
+
+            _logger.info(
+                "Bulk Payment [%d/%d]: %s - Vendor: %s, Bill: %s, Amount: %s",
+                idx + 1,
+                len(payments),
+                payment.name,
+                payment.partner_id.name,
+                bill_id,
+                payment.amount,
+            )
+
+        # Build the bulk payment payload according to Bill.com API v3 format
+        bulk_payload = {
+            "fundingAccount": {
+                "type": common_funding_type,
+            },
+            "payments": payment_items,
+        }
+
+        # Add funding account ID if not WALLET
+        if common_funding_type != "WALLET":
+            bulk_payload["fundingAccount"]["id"] = common_funding_id
+
+        # Add processDate if set
+        if common_process_date:
+            bulk_payload["processDate"] = common_process_date
+
+        # Make bulk payment request to Bill.com API
+        _logger.info("=" * 80)
+        _logger.info("SENDING BULK PAYMENT REQUEST TO BILL.COM")
+        _logger.info("Total payments: %d", len(payment_items))
+        _logger.info(
+            "Funding Account: %s (ID: %s)", common_funding_type, common_funding_id
+        )
+        _logger.info("Process Date: %s", common_process_date or "Not set")
+        _logger.info("Full Payload: %s", bulk_payload)
+        _logger.info("=" * 80)
+
+        try:
+            # POST /v3/payments/bulk
+            result = self._make_request(
+                "payments/bulk", method="POST", data=bulk_payload
+            )
+
+            _logger.info("Bulk payment response received: %s", result)
+
+            # Process results
+            if result and isinstance(result, list):
+                success_count = 0
+                error_count = 0
+                errors = []
+
+                for idx, payment_result in enumerate(result):
+                    payment = payment_mapping.get(idx)
+                    if not payment:
+                        continue
+
+                    if payment_result.get("id"):
+                        # Success - update payment with Bill.com data
+                        update_vals = {
+                            "billcom": payment_result.get("id"),
+                            "billcom_id": payment_result.get("id"),
+                            "last_sync_date": fields.Datetime.now(),
+                            "billcom_payment_status": payment._map_billcom_status(
+                                payment_result.get("singleStatus")
+                            ),
+                            "billcom_confirmation_number": payment_result.get(
+                                "confirmationNumber", ""
+                            ),
+                            "billcom_transaction_number": payment_result.get(
+                                "transactionNumber", ""
+                            ),
+                            "billcom_sync_status": "synced",
+                            "billcom_sync_error": False,
+                        }
+
+                        # Add exchange rate and funding amount for international payments
+                        if payment_result.get("exchangeRate"):
+                            update_vals["billcom_exchange_rate"] = payment_result.get(
+                                "exchangeRate"
+                            )
+                        if payment_result.get("fundingAmount"):
+                            update_vals["billcom_funding_amount"] = payment_result.get(
+                                "fundingAmount"
+                            )
+
+                        payment.with_context(skip_billcom_sync=True).write(update_vals)
+                        success_count += 1
+
+                        # Post success message to chatter
+                        payment.message_post(
+                            body=f"<p><strong>Bill.com Bulk Payment Created</strong></p>"
+                            f"<ul>"
+                            f"<li>Bill.com ID: {payment_result.get('id')}</li>"
+                            f"<li>Status: {payment_result.get('singleStatus')}</li>"
+                            f"<li>Confirmation #: {payment_result.get('confirmationNumber', 'N/A')}</li>"
+                            f"<li>Transaction #: {payment_result.get('transactionNumber', 'N/A')}</li>"
+                            f"<li>Bulk Request: {success_count}/{len(payments_data)}</li>"
+                            f"</ul>",
+                            message_type="notification",
+                            subtype_xmlid="mail.mt_note",
+                        )
+
+                        _logger.info(
+                            "Bulk payment success [%d/%d]: %s - Bill.com ID: %s",
+                            success_count,
+                            len(payments_data),
+                            payment.name,
+                            payment_result.get("id"),
+                        )
+                    else:
+                        # Error
+                        error_msg = payment_result.get(
+                            "error", "Unknown error in bulk payment response"
+                        )
+                        errors.append(f"{payment.name}: {error_msg}")
+                        error_count += 1
+
+                        payment.with_context(skip_billcom_sync=True).write(
+                            {
+                                "billcom_sync_status": "sync_failed",
+                                "billcom_sync_error": error_msg,
+                            }
+                        )
+
+                        _logger.error(
+                            "Bulk payment error [%d/%d]: %s - Error: %s",
+                            error_count,
+                            len(payments_data),
+                            payment.name,
+                            error_msg,
+                        )
+
+                _logger.info("=" * 80)
+                _logger.info("BULK PAYMENT COMPLETE")
+                _logger.info("Success: %d, Errors: %d", success_count, error_count)
+                _logger.info("=" * 80)
+
+                return {
+                    "success": error_count == 0,
+                    "results": result,
+                    "errors": errors,
+                    "success_count": success_count,
+                    "error_count": error_count,
+                }
+
+            return {
+                "success": False,
+                "errors": [f"Unexpected response format from Bill.com: {result}"],
+            }
+
+        except Exception as e:
+            error_detail = str(e)
+            friendly_message = self._extract_friendly_error(e)
+
+            _logger.error("Bulk payment request failed: %s", error_detail)
+
+            # Mark all payments as failed
+            for payment in payments:
+                payment.with_context(skip_billcom_sync=True).write(
+                    {
+                        "billcom_sync_status": "sync_failed",
+                        "billcom_sync_error": friendly_message,
+                    }
+                )
+
+            return {"success": False, "errors": [friendly_message]}

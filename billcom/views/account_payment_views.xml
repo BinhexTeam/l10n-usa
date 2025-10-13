@@ -5,6 +5,7 @@
         <field name="name">Sync to Bill.com</field>
         <field name="model_id" ref="account.model_account_payment" />
         <field name="binding_model_id" ref="account.model_account_payment" />
+        <field name="binding_view_types">form</field>
         <field name="state">code</field>
         <field name="code">records.button_sync_to_billcom()</field>
         <field name="groups_id" eval="[(4, ref('account.group_account_invoice'))]" />
@@ -15,6 +16,7 @@
         <field name="name">Get Bill.com Status</field>
         <field name="model_id" ref="account.model_account_payment" />
         <field name="binding_model_id" ref="account.model_account_payment" />
+        <field name="binding_view_types">form</field>
         <field name="state">code</field>
         <field name="code">records.action_get_payment_status()</field>
         <field name="groups_id" eval="[(4, ref('account.group_account_invoice'))]" />
@@ -25,8 +27,20 @@
         <field name="name">Cancel in Bill.com</field>
         <field name="model_id" ref="account.model_account_payment" />
         <field name="binding_model_id" ref="account.model_account_payment" />
+        <field name="binding_view_types">form</field>
         <field name="state">code</field>
         <field name="code">records.action_cancel_billcom_payment()</field>
+        <field name="groups_id" eval="[(4, ref('account.group_account_invoice'))]" />
+    </record>
+
+    <!-- Action para sincronizar múltiples pagos en bloque a Bill.com -->
+    <record id="action_bulk_sync_to_billcom" model="ir.actions.server">
+        <field name="name">Bulk Sync to Bill.com</field>
+        <field name="model_id" ref="account.model_account_payment" />
+        <field name="binding_model_id" ref="account.model_account_payment" />
+        <field name="binding_view_types">list</field>
+        <field name="state">code</field>
+        <field name="code">records.action_bulk_sync_to_billcom()</field>
         <field name="groups_id" eval="[(4, ref('account.group_account_invoice'))]" />
     </record>
 
@@ -58,12 +72,14 @@
                             name="billcom_funding_account_type"
                             attrs="{'required': [('is_sync_to_billcom', '=', True)]}"
                         />
-                        <field name="is_process_date_sync" invisible="1"/>
+                        <field name="is_process_date_sync" invisible="1" />
                         <label
                             for="billcom_process_date"
                             attrs="{'invisible': [('billcom_funding_account_type', 'not in', ['WALLET', 'AP_CARD']), ('is_process_date_sync', '=', True)]}"
                         />
-                        <div attrs="{'invisible': [('billcom_funding_account_type', 'not in', ['WALLET', 'AP_CARD']), ('is_process_date_sync', '=', True)]}">
+                        <div
+                            attrs="{'invisible': [('billcom_funding_account_type', 'not in', ['WALLET', 'AP_CARD']), ('is_process_date_sync', '=', True)]}"
+                        >
                             <field
                                 name="billcom_process_date"
                                 class="oe_inline"

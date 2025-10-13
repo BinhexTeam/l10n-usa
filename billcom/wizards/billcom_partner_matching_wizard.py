@@ -120,10 +120,10 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
 
         # Get partners from Odoo without billcom_id
         domain = [("billcom_id", "=", False)]
-        if self.partner_type == "vendor":
-            domain.append(("supplier_rank", ">", 0))
-        else:
-            domain.append(("customer_rank", ">", 0))
+        # if self.partner_type == "vendor":
+        #     domain.append(("supplier_rank", ">", 0))
+        # else:
+        #     domain.append(("customer_rank", ">", 0))
 
         odoo_partners = self.env["res.partner"].search(domain)
 

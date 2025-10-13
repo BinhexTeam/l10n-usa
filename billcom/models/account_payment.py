@@ -88,12 +88,13 @@ class AccountPayment(models.Model):
 
         for rec in self:
             if self.partner_bank_id.billcom_last_sync_date:
-                diff = fields.Datetime.today() - self.partner_bank_id.billcom_last_sync_date
+                diff = (
+                    fields.Datetime.today()
+                    - self.partner_bank_id.billcom_last_sync_date
+                )
                 rec.is_process_date_sync = diff >= timedelta(days=1)
             else:
                 rec.is_process_date_sync = True
-
-
 
     @api.depends("partner_id", "partner_id.country_id")
     def _compute_is_international_payment(self):
@@ -923,3 +924,88 @@ class AccountPayment(models.Model):
                 _logger.info("Bill.com payment status check is disabled")
         except Exception as e:
             _logger.error("Error in Bill.com payment status update: %s", str(e))
+
+    def action_bulk_sync_to_billcom(self):
+        """Bulk sync multiple payments to Bill.com
+
+        This action allows users to select multiple payments and process them
+        in a single Bill.com API request (up to 50 payments).
+
+        Requirements:
+        - All payments must be outbound supplier payments
+        - All payments must be linked to existing bills with Bill.com IDs
+        - All payments must be marked for Bill.com sync
+        - Maximum 50 payments per request
+        """
+        if not self:
+            raise UserError(_("No payments selected"))
+
+        # Validate all payments before processing
+        for payment in self:
+            if (
+                not payment.is_sync_to_billcom
+                or not payment.partner_id.is_sync_to_billcom
+            ):
+                raise UserError(
+                    _(
+                        "Payment %s or vendor %s is not marked for Bill.com synchronization"
+                    )
+                    % (payment.name, payment.partner_id.name)
+                )
+
+            if payment.payment_type != "outbound" or payment.partner_type != "supplier":
+                raise UserError(
+                    _(
+                        "Payment %s is not a vendor payment (must be outbound supplier payment)"
+                    )
+                    % payment.name
+                )
+
+            # Check if payment has linked bill with Bill.com ID
+            has_billcom_bill = False
+            if payment.reconciled_bill_ids:
+                for bill in payment.reconciled_bill_ids:
+                    if bill.billcom_id or bill.billcom:
+                        has_billcom_bill = True
+                        break
+
+            if not has_billcom_bill:
+                raise UserError(
+                    _(
+                        "Payment %s does not have a linked bill with Bill.com ID. "
+                        "Bulk payments can only pay existing bills. "
+                        "Please sync the bill to Bill.com first or use single payment creation."
+                    )
+                    % payment.name
+                )
+
+        # Call bulk payment creation
+        try:
+            result = self.env["billcom.service"].create_bulk_payments(self)
+
+            if result.get("success"):
+                success_count = result.get("success_count", 0)
+                error_count = result.get("error_count", 0)
+
+                return {
+                    "type": "ir.actions.client",
+                    "tag": "display_notification",
+                    "params": {
+                        "title": _("Bulk Payment Success"),
+                        "message": _(
+                            "Successfully processed %d payments to Bill.com. "
+                            "Errors: %d"
+                        )
+                        % (success_count, error_count),
+                        "type": "success" if error_count == 0 else "warning",
+                        "sticky": False,
+                    },
+                }
+            else:
+                errors = result.get("errors", ["Unknown error"])
+                error_message = "\n".join(errors)
+                raise UserError(_("Bulk payment failed:\n\n%s") % error_message)
+
+        except Exception as e:
+            _logger.error("Bulk payment action error: %s", str(e))
+            raise UserError(_("Bulk payment failed: %s") % str(e)) from e
