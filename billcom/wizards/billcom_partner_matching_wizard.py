@@ -137,12 +137,47 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
                 % self.partner_type
             )
 
-        # Get vendors/customers from Bill.com
+        # Get vendors/customers from Bill.com with pagination support
         endpoint = "vendors" if self.partner_type == "vendor" else "customers"
+        billcom_partners = []
         try:
-            result = service._make_request(endpoint, method="GET")
-            billcom_partners = result.get("results", [])
-            _logger.info(f"Billcom partners {billcom_partners}")
+            # Fetch all pages of results
+            next_page = None
+            page_num = 1
+
+            while True:
+                _logger.info(
+                    f"Fetching {self.partner_type}s from Bill.com - Page {page_num}"
+                )
+
+                # Build params with pagination
+                params = {"max": 100}
+                if next_page:
+                    params["page"] = next_page
+
+                result = service._make_request(endpoint, method="GET", params=params)
+
+                if not result:
+                    break
+
+                # Add results from this page
+                page_results = result.get("results", [])
+                billcom_partners.extend(page_results)
+                _logger.info(
+                    f"Page {page_num}: Fetched {len(page_results)} {self.partner_type}s (Total: {len(billcom_partners)})"
+                )
+
+                # Check if there are more pages
+                next_page = result.get("nextPage")
+                if not next_page:
+                    break
+
+                page_num += 1
+
+            _logger.info(
+                f"✓ Completed fetching all {len(billcom_partners)} {self.partner_type}s from Bill.com"
+            )
+
         except Exception as e:
             raise UserError(_("Error fetching data from Bill.com: %s") % str(e))
 

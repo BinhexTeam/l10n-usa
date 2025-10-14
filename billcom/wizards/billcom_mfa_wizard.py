@@ -1,10 +1,10 @@
-# Copyright 2025 ForgeFlow S.L.
+# Copyright 2025 Binhex.
 # License AGPL-3.0 or later (http://www.gnu.org/licenses/agpl).
 
-from odoo import _, api, fields, models
-from odoo.exceptions import UserError
-
 import logging
+
+from odoo import _, fields, models
+from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
