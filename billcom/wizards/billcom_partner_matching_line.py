@@ -543,6 +543,7 @@ class BillcomPartnerMatchingLine(models.TransientModel):
                                 "acc_number": bank_data.get("accountNumber"),
                                 "bank_name": bank_data.get("bankName"),
                                 "currency_id": currency.id,
+                                "billcom_vendor_id": child_partner.id,  # Link bank to child vendor
                             }
 
                             if bank_data.get("routingNumber"):
@@ -849,6 +850,7 @@ class BillcomPartnerMatchingLine(models.TransientModel):
                             "acc_number": bank_data.get("accountNumber"),
                             "bank_name": bank_data.get("bankName"),
                             "currency_id": currency.id,
+                            "billcom_vendor_id": child_partner.id,  # Link bank to child vendor
                         }
 
                         # Map routing number to ABA

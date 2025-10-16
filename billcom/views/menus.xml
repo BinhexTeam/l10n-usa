@@ -6,6 +6,7 @@
         name="Bill.com"
         web_icon="billcom,static/description/icon.png"
         sequence="100"
+        groups="billcom.group_billcom_payment_manager"
     />
 
 

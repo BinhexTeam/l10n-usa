@@ -17,6 +17,7 @@
                     name="billcom_group"
                     string="Bill.com Integration"
                     attrs="{'invisible': ['|', ('payment_type', '!=', 'outbound'), ('partner_type', '!=', 'supplier')]}"
+                    groups="billcom.group_billcom_payment_manager"
                 >
                     <field name="is_sync_to_billcom" />
                     <field

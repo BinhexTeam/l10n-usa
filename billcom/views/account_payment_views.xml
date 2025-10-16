@@ -147,21 +147,21 @@
                     type="action"
                     class="oe_highlight"
                     attrs="{'invisible': ['|', '|', '|', ('is_sync_to_billcom', '=', False), ('payment_type', '!=', 'outbound'), ('partner_type', '!=', 'supplier'), ('state', '!=', 'posted')]}"
-                    groups="account.group_account_invoice"
+                    groups="billcom.group_billcom_payment_manager"
                 />
                 <button
                     name="%(action_get_payment_status)d"
                     string="Get Bill.com Status"
                     type="action"
                     attrs="{'invisible': ['|', ('billcom_id', '=', False), ('billcom_payment_status', 'in', ['processed', 'sent', 'canceled', 'failed'])]}"
-                    groups="account.group_account_invoice"
+                    groups="billcom.group_billcom_payment_manager"
                 />
                 <button
                     name="%(action_cancel_billcom_payment)d"
                     string="Cancel in Bill.com"
                     type="action"
                     attrs="{'invisible': ['|', ('billcom_id', '=', False), ('billcom_payment_status', 'not in', ['draft', 'scheduled'])]}"
-                    groups="account.group_account_invoice"
+                    groups="billcom.group_billcom_payment_manager"
                 />
             </xpath>
         </field>

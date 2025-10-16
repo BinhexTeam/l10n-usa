@@ -33,3 +33,6 @@ access_billcom_bill_status_user,billcom.bill.status user,model_billcom_bill_stat
 access_billcom_bill_approval_status_user,billcom.bill.approval.status user,model_billcom_bill_approval_status,base.group_user,1,0,0,0
 access_billcom_invoice_status_user,billcom.invoice.status user,model_billcom_invoice_status,base.group_user,1,0,0,0
 access_billcom_payment_status_user,billcom.payment.status user,model_billcom_payment_status,base.group_user,1,0,0,0
+access_account_payment_billcom_user,account.payment billcom user,account.model_account_payment,group_billcom_user,1,0,0,0
+access_account_payment_billcom_approver,account.payment billcom approver,account.model_account_payment,group_billcom_approver,1,0,0,0
+access_account_payment_billcom_payment_manager,account.payment billcom manager,account.model_account_payment,group_billcom_payment_manager,1,1,1,0

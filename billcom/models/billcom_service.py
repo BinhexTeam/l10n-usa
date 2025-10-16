@@ -1883,6 +1883,7 @@ class BillcomService(models.AbstractModel):
         bank_vals = {
             "partner_id": partner.id,
             "bank_id": bank.id,
+            "billcom_vendor_id": partner.id,  # Link bank to vendor for parent-child sync
             # Bill.com specific fields
             "billcom_pay_by_type": payment_info.get("payByType"),
             "billcom_pay_by_subtype": payment_info.get("payBySubType", "NONE"),
