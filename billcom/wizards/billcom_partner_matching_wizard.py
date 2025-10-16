@@ -263,9 +263,14 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
                 )
 
                 # Build params with pagination
-                params = {"max": 100, "filters": "archived:eq:false"}
+                # Note: Bill.com API does not allow filters when using page token
+                params = {"max": 100}
                 if next_page:
+                    # When using page token, DO NOT send filters
                     params["page"] = next_page
+                else:
+                    # Only send filters on first request
+                    params["filters"] = "archived:eq:false"
 
                 result = service._make_request(endpoint, method="GET", params=params)
 
@@ -289,6 +294,20 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
             _logger.info(
                 f"✓ Completed fetching all {len(billcom_partners)} {self.partner_type}s from Bill.com"
             )
+
+            # Filter out archived partners (in case pagination brought some)
+            original_count = len(billcom_partners)
+            billcom_partners = [
+                partner
+                for partner in billcom_partners
+                if not partner.get("archived", False)
+            ]
+            filtered_archived = original_count - len(billcom_partners)
+            if filtered_archived > 0:
+                _logger.info(
+                    f"Filtered out {filtered_archived} archived partners. "
+                    f"Remaining: {len(billcom_partners)} active partners"
+                )
 
         except Exception as e:
             raise UserError(_("Error fetching data from Bill.com: %s") % str(e))
