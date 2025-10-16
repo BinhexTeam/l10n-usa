@@ -60,6 +60,12 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         string="No Match Lines",
         domain=[("confidence_level", "=", "none")],
     )
+    duplicate_group_line_ids = fields.One2many(
+        "billcom.partner.matching.line",
+        "wizard_id",
+        string="Duplicate Group Lines",
+        domain=[("is_duplicate_group", "=", True)],
+    )
     auto_link_high_confidence = fields.Boolean(
         string="Auto-link matches with 100% confidence (3/3 criteria)",
         default=False,
@@ -80,8 +86,19 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
     no_match_count = fields.Integer(
         string="No Matches", compute="_compute_stats", store=True
     )
+    selected_count = fields.Integer(
+        string="Selected Lines", compute="_compute_stats", store=True
+    )
+    duplicate_group_count = fields.Integer(
+        string="Duplicate Groups", compute="_compute_stats", store=True
+    )
 
-    @api.depends("line_ids", "line_ids.confidence_level")
+    @api.depends(
+        "line_ids",
+        "line_ids.confidence_level",
+        "line_ids.selected",
+        "line_ids.is_duplicate_group",
+    )
     def _compute_stats(self):
         for wizard in self:
             wizard.total_partners = len(wizard.line_ids)
@@ -97,6 +114,101 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
             wizard.no_match_count = len(
                 wizard.line_ids.filtered(lambda l: l.confidence_level == "none")
             )
+            wizard.selected_count = len(wizard.line_ids.filtered(lambda l: l.selected))
+            wizard.duplicate_group_count = len(
+                wizard.line_ids.filtered(lambda l: l.is_duplicate_group)
+            )
+
+    def _normalize_partner_name(self, name):
+        """Normalize partner name for duplicate detection
+
+        Args:
+            name (str): Partner name to normalize
+
+        Returns:
+            str: Normalized name (lowercase, no special chars, trimmed)
+        """
+        if not name:
+            return ""
+
+        import re
+
+        # Convert to lowercase
+        normalized = name.lower()
+
+        # Remove common company suffixes
+        suffixes = [
+            "inc",
+            "incorporated",
+            "corp",
+            "corporation",
+            "llc",
+            "ltd",
+            "limited",
+            "co",
+            "company",
+            "gmbh",
+            "s.a.",
+            "sa",
+            "srl",
+            "usd",
+            "eur",
+            "gbp",
+            "cad",
+            "aud",  # Currency codes
+        ]
+        for suffix in suffixes:
+            # Remove suffix with optional punctuation and spaces
+            normalized = re.sub(rf"\b{re.escape(suffix)}\b[.,\s]*", "", normalized)
+
+        # Remove all special characters and extra spaces
+        normalized = re.sub(r"[^a-z0-9\s]", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
+        normalized = normalized.strip()
+
+        return normalized
+
+    def _group_billcom_duplicates(self, billcom_partners):
+        """Group Bill.com partners by normalized name to detect duplicates
+
+        Args:
+            billcom_partners (list): List of Bill.com partner dictionaries
+
+        Returns:
+            tuple: (grouped_partners, duplicates)
+                - grouped_partners: dict {normalized_name: [partner_dicts]}
+                - duplicates: dict {normalized_name: [partner_dicts]} (only groups with >1 partner)
+        """
+        from collections import defaultdict
+
+        grouped = defaultdict(list)
+
+        for partner in billcom_partners:
+            name = partner.get("name", "")
+            normalized = self._normalize_partner_name(name)
+
+            # Store partner with normalized key
+            grouped[normalized].append(partner)
+
+        # Identify duplicates (groups with multiple partners)
+        duplicates = {
+            name: partners for name, partners in grouped.items() if len(partners) > 1
+        }
+
+        _logger.info(
+            f"Duplicate detection: {len(billcom_partners)} total partners, "
+            f"{len(grouped)} unique names, {len(duplicates)} duplicate groups"
+        )
+
+        if duplicates:
+            for normalized_name, partners in duplicates.items():
+                currencies = [p.get("billCurrency", "USD") for p in partners]
+                _logger.info(
+                    f"  Duplicate group '{normalized_name}': {len(partners)} partners "
+                    f"with currencies {currencies}"
+                )
+
+        return grouped, duplicates
 
     def action_find_matches(self):
         """Find matches between Odoo partners and Bill.com vendors/customers"""
@@ -186,18 +298,136 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
                 _("No %ss found in Bill.com") % self.partner_type.capitalize()
             )
 
+        # Group Bill.com partners to detect duplicates
+        grouped_partners, duplicate_groups = self._group_billcom_duplicates(
+            billcom_partners
+        )
+
         _logger.info(
             f"Starting matching: {len(billcom_partners)} Bill.com partners vs {len(odoo_partners)} Odoo partners"
         )
 
+        # Track processed Bill.com IDs to avoid duplicates in matching lines
+        processed_billcom_ids = set()
+
         # Reverse logic: Find matches for each Bill.com partner against ALL Odoo partners
         matching_lines = []
+
+        # Process duplicate groups first (multiple Bill.com records → one Odoo partner)
+        for normalized_name, partners in duplicate_groups.items():
+            # Get all Bill.com IDs and currencies in this group
+            billcom_ids_data = []
+            for partner in partners:
+                billcom_ids_data.append(
+                    {
+                        "id": partner["id"],
+                        "name": partner.get("name", ""),
+                        "currency": partner.get("billCurrency", "USD"),
+                        "email": partner.get("email", ""),
+                        "phone": partner.get("phone", ""),
+                    }
+                )
+                processed_billcom_ids.add(partner["id"])
+
+            # Use first partner as representative for matching
+            representative = partners[0]
+
+            # Find Odoo matches for this group
+            potential_matches = self._find_odoo_matches(representative, odoo_partners)
+
+            # Build display name showing all currencies
+            currencies = [p.get("billCurrency", "USD") for p in partners]
+            display_name = f"{representative.get('name', '')} ({', '.join(currencies)})"
+
+            import json
+
+            if not potential_matches:
+                # No matches - suggest creating ONE Odoo partner for ALL Bill.com records
+                matching_lines.append(
+                    {
+                        "wizard_id": self.id,
+                        "odoo_partner_id": False,
+                        "billcom_partner_id": representative["id"],  # Primary ID
+                        "billcom_partner_name": display_name,
+                        "billcom_partner_email": representative.get("email", ""),
+                        "billcom_partner_phone": representative.get("phone", ""),
+                        "billcom_ids_json": json.dumps(billcom_ids_data),
+                        "is_duplicate_group": True,
+                        "confidence_level": "none",
+                        "match_score": 0,
+                        "match_details": f"Duplicate group: {len(partners)} Bill.com records with different currencies → Create ONE Odoo partner",
+                        "action": "create",
+                    }
+                )
+            else:
+                # Found matches - Select BEST match and create ONE line to link entire group
+                best_match = max(potential_matches, key=lambda m: m["score"])
+
+                # Check if any Bill.com ID from group is already linked to an Odoo partner
+                already_linked_partner = None
+                already_linked_ids = []
+                for bc_data in billcom_ids_data:
+                    existing = self.env["res.partner"].search(
+                        [
+                            "|",
+                            ("billcom_id", "=", bc_data["id"]),
+                            ("billcom", "=", bc_data["id"]),
+                        ],
+                        limit=1,
+                    )
+                    if existing:
+                        already_linked_partner = existing
+                        already_linked_ids.append(bc_data["id"])
+
+                # Determine action based on whether some IDs are already linked
+                if already_linked_partner:
+                    # Some IDs already linked - use that partner and complete the group
+                    action = "link"  # Will complete the group link
+                    confidence = "high"
+                    odoo_partner_id = already_linked_partner.id
+                    match_details = (
+                        f"Duplicate group: {len(partners)} Bill.com IDs, "
+                        f"{len(already_linked_ids)} already linked to '{already_linked_partner.name}' → "
+                        f"Complete group link"
+                    )
+                else:
+                    # No IDs linked yet - link all to best match
+                    action = (
+                        "link" if best_match["confidence_level"] == "high" else "review"
+                    )
+                    confidence = best_match["confidence_level"]
+                    odoo_partner_id = best_match["odoo_id"]
+                    match_details = (
+                        f"Duplicate group: {len(partners)} Bill.com IDs → "
+                        f"Link all to '{self.env['res.partner'].browse(best_match['odoo_id']).name}'"
+                    )
+
+                matching_lines.append(
+                    {
+                        "wizard_id": self.id,
+                        "odoo_partner_id": odoo_partner_id,
+                        "billcom_partner_id": representative["id"],
+                        "billcom_partner_name": display_name,
+                        "billcom_partner_email": representative.get("email", ""),
+                        "billcom_partner_phone": representative.get("phone", ""),
+                        "billcom_ids_json": json.dumps(billcom_ids_data),
+                        "is_duplicate_group": True,
+                        "confidence_level": confidence,
+                        "match_score": best_match["score"],
+                        "match_details": match_details,
+                        "action": action,
+                    }
+                )
+
+        # Process remaining single Bill.com partners (not in duplicate groups)
         for billcom_partner in billcom_partners:
+            if billcom_partner["id"] in processed_billcom_ids:
+                continue  # Skip already processed duplicates
             # Find ALL potential Odoo matches for this Bill.com partner
             potential_matches = self._find_odoo_matches(billcom_partner, odoo_partners)
 
             if not potential_matches:
-                # No matches found - create empty line for review
+                # No matches found - suggest creating new partner in Odoo
                 matching_lines.append(
                     {
                         "wizard_id": self.id,
@@ -208,8 +438,8 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
                         "billcom_partner_phone": billcom_partner.get("phone", ""),
                         "confidence_level": "none",
                         "match_score": 0,
-                        "match_details": "No matches found",
-                        "action": "review",
+                        "match_details": "No matches found - Create new partner suggested",
+                        "action": "create",  # Suggest create action for no matches
                     }
                 )
             else:
@@ -386,25 +616,221 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         return matches
 
     def action_apply_selected(self):
-        """Apply selected links"""
+        """Apply actions to selected lines based on their action field
+
+        Processes only lines with selected=True according to their action:
+        - 'create': Creates new partner (parent-child for duplicate groups)
+        - 'link': Links to existing partner (parent-child for duplicate groups)
+        - 'ignore': Marks as ignored
+        """
         self.ensure_one()
 
-        lines_to_link = self.line_ids.filtered(lambda l: l.action == "link")
+        # Filter ONLY selected lines
+        selected_lines = self.line_ids.filtered(lambda l: l.selected)
 
-        if not lines_to_link:
-            raise UserError(_("No partners selected to link"))
+        if not selected_lines:
+            raise UserError(_("No lines selected. Please select lines to process."))
 
-        lines_to_link.action_apply_link()
+        # Group by action
+        lines_to_create = selected_lines.filtered(lambda l: l.action == "create")
+        lines_to_link = selected_lines.filtered(lambda l: l.action == "link")
+        lines_to_ignore = selected_lines.filtered(lambda l: l.action == "ignore")
 
-        self.state = "done"
+        _logger.info(
+            f"Processing selected lines: {len(lines_to_create)} create, "
+            f"{len(lines_to_link)} link, {len(lines_to_ignore)} ignore"
+        )
+
+        # Process CREATE actions
+        for line in lines_to_create:
+            try:
+                if line.is_duplicate_group and line.billcom_ids_json:
+                    _logger.info(
+                        f"Creating parent-child structure for duplicate group: {line.billcom_partner_name}"
+                    )
+                    line._create_partner_from_duplicate_group()
+                else:
+                    _logger.info(
+                        f"Creating single partner: {line.billcom_partner_name}"
+                    )
+                    line.action_apply_create()
+            except Exception as e:
+                _logger.error(
+                    f"Error creating partner {line.billcom_partner_name}: {e}"
+                )
+                line.write({"state": "error", "error_message": str(e)})
+
+        # Process LINK actions
+        for line in lines_to_link:
+            try:
+                if line.is_duplicate_group and line.billcom_ids_json:
+                    _logger.info(
+                        f"Linking duplicate group to parent: {line.billcom_partner_name}"
+                    )
+                    line._link_duplicate_group_to_existing_partner()
+                else:
+                    _logger.info(f"Linking single partner: {line.billcom_partner_name}")
+                    line.action_apply_link()
+            except Exception as e:
+                _logger.error(f"Error linking partner {line.billcom_partner_name}: {e}")
+                line.write({"state": "error", "error_message": str(e)})
+
+        # Process IGNORE actions
+        for line in lines_to_ignore:
+            line.write({"state": "ignored"})
+            _logger.info(f"Ignored: {line.billcom_partner_name}")
+
+        # Build summary message
+        messages = []
+        if lines_to_create:
+            created_success = lines_to_create.filtered(lambda l: l.state == "created")
+            messages.append(
+                _("%d partners created (%d succeeded)")
+                % (len(lines_to_create), len(created_success))
+            )
+        if lines_to_link:
+            linked_success = lines_to_link.filtered(lambda l: l.state == "linked")
+            messages.append(
+                _("%d partners linked (%d succeeded)")
+                % (len(lines_to_link), len(linked_success))
+            )
+        if lines_to_ignore:
+            messages.append(_("%d partners ignored") % len(lines_to_ignore))
 
         return {
             "type": "ir.actions.client",
             "tag": "display_notification",
             "params": {
                 "title": _("Success"),
-                "message": _("%d partners successfully linked with Bill.com")
-                % len(lines_to_link),
+                "message": " and ".join(messages),
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_select_all(self):
+        """Select all lines for bulk operations"""
+        self.ensure_one()
+        self.line_ids.write({"selected": True})
+        return {"type": "ir.actions.act_window_close"}
+
+    def action_deselect_all(self):
+        """Deselect all lines"""
+        self.ensure_one()
+        self.line_ids.write({"selected": False})
+        return {"type": "ir.actions.act_window_close"}
+
+    def action_select_no_match(self):
+        """Select only lines with no matches (to create in Odoo)"""
+        self.ensure_one()
+        # First deselect all
+        self.line_ids.write({"selected": False})
+        # Then select only no match lines
+        no_match_lines = self.line_ids.filtered(lambda l: l.confidence_level == "none")
+        no_match_lines.write({"selected": True})
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Selection Updated"),
+                "message": _("%d lines selected (No Match only)") % len(no_match_lines),
+                "type": "info",
+                "sticky": False,
+            },
+        }
+
+    def action_select_high_confidence(self):
+        """Select only high confidence matches (to link)"""
+        self.ensure_one()
+        # First deselect all
+        self.line_ids.write({"selected": False})
+        # Then select only high confidence lines
+        high_conf_lines = self.line_ids.filtered(lambda l: l.confidence_level == "high")
+        high_conf_lines.write({"selected": True})
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Selection Updated"),
+                "message": _("%d lines selected (High Confidence only)")
+                % len(high_conf_lines),
+                "type": "info",
+                "sticky": False,
+            },
+        }
+
+    def action_bulk_set_link(self):
+        """Set selected lines to 'Link' action"""
+        self.ensure_one()
+        selected_lines = self.line_ids.filtered(lambda l: l.selected)
+
+        if not selected_lines:
+            raise UserError(_("No lines selected. Please select lines first."))
+
+        # Only set to link if they have an Odoo partner
+        linkable_lines = selected_lines.filtered(lambda l: l.odoo_partner_id)
+        non_linkable = selected_lines - linkable_lines
+
+        linkable_lines.write({"action": "link"})
+
+        message_parts = []
+        if linkable_lines:
+            message_parts.append(_("%d lines set to 'Link'") % len(linkable_lines))
+        if non_linkable:
+            message_parts.append(
+                _("%d lines skipped (no Odoo partner selected)") % len(non_linkable)
+            )
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Bulk Action Applied"),
+                "message": ", ".join(message_parts),
+                "type": "success" if not non_linkable else "warning",
+                "sticky": False,
+            },
+        }
+
+    def action_bulk_set_create(self):
+        """Set selected lines to 'Create in Odoo' action"""
+        self.ensure_one()
+        selected_lines = self.line_ids.filtered(lambda l: l.selected)
+
+        if not selected_lines:
+            raise UserError(_("No lines selected. Please select lines first."))
+
+        selected_lines.write({"action": "create"})
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Bulk Action Applied"),
+                "message": _("%d lines set to 'Create in Odoo'") % len(selected_lines),
+                "type": "success",
+                "sticky": False,
+            },
+        }
+
+    def action_bulk_set_ignore(self):
+        """Set selected lines to 'Ignore' action"""
+        self.ensure_one()
+        selected_lines = self.line_ids.filtered(lambda l: l.selected)
+
+        if not selected_lines:
+            raise UserError(_("No lines selected. Please select lines first."))
+
+        selected_lines.write({"action": "ignore"})
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Bulk Action Applied"),
+                "message": _("%d lines set to 'Ignore'") % len(selected_lines),
                 "type": "success",
                 "sticky": False,
             },

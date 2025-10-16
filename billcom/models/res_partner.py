@@ -120,8 +120,14 @@ class ResPartner(models.Model):
 
             # Add paymentInformation if vendor has bank account
             # This is required for enabling electronic payments to vendors
-            if self.bank_ids:
-                bank = self.bank_ids[0]  # Use first bank account
+            # For child partners, use parent's bank accounts (parent-child structure)
+            bank_partner = self.parent_id if self.parent_id else self
+            if bank_partner.bank_ids:
+                bank = bank_partner.bank_ids.filtered(
+                    lambda r: r.billcom_vendor_id.id == self.id
+                )  # Use first bank account
+                if not bank:
+                    bank = bank_partner.bank_ids[0]  # Fallback to first bank account
 
                 # Check if we have minimum required bank information
                 # Get routing number with priority
@@ -200,18 +206,34 @@ class ResPartner(models.Model):
                                 ] = bank.bank_id.country.name
 
                     vendor_data["paymentInformation"] = payment_info
-                    _logger.info(
-                        "Added paymentInformation for vendor %s: %s",
-                        self.name,
-                        payment_info,
-                    )
+                    if bank_partner != self:
+                        _logger.info(
+                            "Added paymentInformation for vendor %s from parent %s: %s",
+                            self.name,
+                            bank_partner.name,
+                            payment_info,
+                        )
+                    else:
+                        _logger.info(
+                            "Added paymentInformation for vendor %s: %s",
+                            self.name,
+                            payment_info,
+                        )
                 else:
                     _logger.info(
-                        "Vendor %s has bank account but missing account number or routing number",
+                        "Vendor %s (using %s for banks) has bank account but missing account number or routing number",
                         self.name,
+                        bank_partner.name,
                     )
             else:
-                _logger.info("Vendor %s has no bank accounts", self.name)
+                if bank_partner != self:
+                    _logger.info(
+                        "Vendor %s: parent %s has no bank accounts",
+                        self.name,
+                        bank_partner.name,
+                    )
+                else:
+                    _logger.info("Vendor %s has no bank accounts", self.name)
 
             # Log final vendor data
             _logger.info("Final vendor data for Bill.com: %s", vendor_data)
@@ -377,7 +399,12 @@ class ResPartnerBank(models.Model):
         domain=[("status", "=", "VERIFIED")],
         ondelete="restrict",
     )
-
+    billcom_vendor_id = fields.Many2one(
+        comodel_name="res.partner",
+        string="Bill.com Vendor",
+        help="Link to the Bill.com vendor (partner) associated with this bank account",
+        copy=False,
+    )
     # Bill.com Vendor Bank Account Fields (vendor/customer's bank account)
     billcom_vendor_bank_id = fields.Char(
         string="Bill.com Vendor Bank ID",
@@ -465,9 +492,12 @@ class ResPartnerBank(models.Model):
             return
 
         # Only sync if partner is synced to Bill.com and has a Bill.com ID
-        if not self.partner_id.billcom_id or not self.partner_id.is_sync_to_billcom:
+        if (
+            not self.billcom_vendor_id.billcom_id
+            or not self.billcom_vendor_id.is_sync_to_billcom
+        ):
             _logger.info(
-                f"Skipping bank account sync: partner {self.partner_id.name} "
+                f"Skipping bank account sync: partner {self.billcom_vendor_id.name} "
                 f"not synced to Bill.com"
             )
             return
@@ -500,7 +530,7 @@ class ResPartnerBank(models.Model):
 
         try:
             service = self.env["billcom.service"]
-            vendor_id = self.partner_id.billcom_id
+            vendor_id = self.billcom_vendor_id.billcom_id
 
             # Prepare bank account data for Bill.com API v3
             # Endpoint: POST /v3/vendors/:vendorId/bank-account

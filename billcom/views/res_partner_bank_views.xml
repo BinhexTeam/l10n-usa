@@ -26,6 +26,11 @@
                 />
 
                 <field
+                    name="billcom_vendor_id"
+                    domain="[('parent_id', '=', partner_id)]"
+                    attrs="{'invisible': [('partner_id', '=', False)]}"
+                />
+                <field
                     name="billcom_vendor_bank_id"
                     readonly="1"
                     attrs="{'invisible': [('partner_id', '=', False)]}"

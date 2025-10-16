@@ -22,7 +22,13 @@
                 >
                     <group>
                         <field name="billcom_id" invisible="1" />
-                        <field name="billcom_sync_manual" widget="boolean_toggle" />1
+                        <field name="is_sync_to_billcom" />
+                    </group>
+
+
+                    <group attrs="{'invisible': [('is_sync_to_billcom', '=', False)]}">
+
+                        <field name="billcom_sync_manual" widget="boolean_toggle" />
                         <field
                             name="billcom_res_currency_id"
                             options="{'no_create': True}"
@@ -53,14 +59,12 @@
                         </div>
 
                     </group>
-                    <group>
-
+                    <group attrs="{'invisible': [('is_sync_to_billcom', '=', False)]}">
                         <group
                             string="Vendor"
                             groups="account.group_account_invoice"
                             attrs="{'invisible': [('supplier_rank', '=', 0)]}"
                         >
-                            <field name="is_sync_to_billcom" />
                             <field
                                 name="billcom_id"
                                 readonly="1"
@@ -101,7 +105,7 @@
                             groups="account.group_account_invoice"
                             attrs="{'invisible': [('customer_rank', '=', 0)]}"
                         >
-                            <field name="is_sync_to_billcom" />
+
                             <field
                                 name="billcom_id"
                                 attrs="{'invisible': [('billcom_id', '=', False),('billcom_sync_manual', '=', False)]}"

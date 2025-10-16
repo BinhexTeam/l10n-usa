@@ -13,6 +13,7 @@
                 decoration-bf="state=='linked'"
                 editable="bottom"
             >
+                <field name="selected" widget="boolean_toggle" />
                 <field name="state" invisible="1" />
                 <field name="confidence_color" invisible="1" />
                 <field name="confidence_level" />
@@ -25,21 +26,6 @@
                 <field name="billcom_partner_email" />
                 <field name="billcom_partner_phone" />
                 <field name="action" />
-                <button
-                    name="action_apply_link"
-                    string="Link Now"
-                    type="object"
-                    icon="fa-link"
-                    attrs="{'invisible': [('state', '=', 'linked')]}"
-                />
-                <button
-                    name="action_unlink_partner"
-                    string="Unlink"
-                    type="object"
-                    icon="fa-unlink"
-                    attrs="{'invisible': [('state', '!=', 'linked')]}"
-                    confirm="Are you sure you want to unlink this partner?"
-                />
             </tree>
         </field>
     </record>
@@ -60,7 +46,7 @@
                     />
                     <button
                         name="action_apply_selected"
-                        string="Apply Selected Links"
+                        string="Apply Selected"
                         type="object"
                         class="oe_highlight"
                         attrs="{'invisible': [('state', '!=', 'review')]}"
@@ -133,25 +119,67 @@
                             <field name="medium_confidence_count" />
                             <field name="low_confidence_count" />
                             <field name="no_match_count" />
+                            <field
+                                name="duplicate_group_count"
+                                string="Duplicate Groups"
+                            />
+                            <field
+                                name="selected_count"
+                                string="Selected for Bulk Action"
+                            />
                         </group>
                     </group>
 
                     <!-- Review State - Matching Lines -->
                     <notebook attrs="{'invisible': [('state', '!=', 'review')]}">
                         <page string="All Matches">
+                            <div class="alert alert-info" role="alert">
+                                <p>
+                                    <strong>Instructions:</strong>
+                                </p>
+                                <ul>
+                                    <li>
+                                        <strong>Duplicate Groups (purple/blue):</strong>
+                                        Multiple Bill.com vendors with same name but different currencies.
+                                        They will be imported as ONE Odoo partner with multiple currency links.
+                                    </li>
+                                    <li>
+                                        <strong>Link:</strong>
+                                        Connect Bill.com vendor to existing Odoo partner.
+                                    </li>
+                                    <li>
+                                        <strong>Create:</strong>
+                                        Create new Odoo partner from Bill.com data.
+                                    </li>
+                                    <li>
+                                        <strong>Ignore:</strong>
+                                        Skip this Bill.com vendor.
+                                    </li>
+                                </ul>
+                            </div>
                             <field name="line_ids" nolabel="1">
                                 <tree
-                                    decoration-success="confidence_level=='high'"
-                                    decoration-info="confidence_level=='medium'"
-                                    decoration-warning="confidence_level=='low'"
-                                    decoration-muted="confidence_level=='none'"
+                                    decoration-success="confidence_level=='high' and is_duplicate_group==False"
+                                    decoration-info="confidence_level=='medium' and is_duplicate_group==False"
+                                    decoration-warning="confidence_level=='low' and is_duplicate_group==False"
+                                    decoration-muted="confidence_level=='none' and is_duplicate_group==False"
                                     decoration-bf="state=='linked'"
+                                    decoration-primary="is_duplicate_group==True"
                                     editable="bottom"
                                 >
+                                    <field name="selected" widget="boolean_toggle" />
                                     <field name="state" invisible="1" />
                                     <field name="wizard_id" invisible="1" />
+                                    <field name="is_duplicate_group" invisible="1" />
+                                    <field name="billcom_ids_json" invisible="1" />
                                     <field name="confidence_level" string="Conf." />
                                     <field name="match_score" string="Score" />
+                                    <field
+                                        name="billcom_ids_count"
+                                        string="# IDs"
+                                        optional="show"
+                                        attrs="{'invisible': [('is_duplicate_group', '=', False)]}"
+                                    />
                                     <field
                                         name="match_details"
                                         string="Match Details"
@@ -194,21 +222,6 @@
 
                                     <field name="action" />
                                     <field name="error_message" optional="hide" />
-                                    <button
-                                        name="action_apply_link"
-                                        string="Link Now"
-                                        type="object"
-                                        icon="fa-link"
-                                        attrs="{'invisible': [('state', '=', 'linked')]}"
-                                    />
-                                    <button
-                                        name="action_unlink_partner"
-                                        string="Unlink"
-                                        type="object"
-                                        icon="fa-unlink"
-                                        attrs="{'invisible': [('state', '!=', 'linked')]}"
-                                        confirm="Are you sure you want to unlink this partner?"
-                                    />
                                 </tree>
                             </field>
                         </page>
@@ -239,6 +252,70 @@
                                 nolabel="1"
                                 context="{'tree_view_ref': 'billcom.view_billcom_partner_matching_line_tree'}"
                             />
+                        </page>
+                        <page string="Duplicate Groups">
+                            <div class="alert alert-warning" role="alert">
+                                <p>
+                                    <strong>Duplicate Group Management</strong>
+                                </p>
+                                <p>
+                                    These are Bill.com vendors/customers with the same name but different currencies.
+                                    Each group will be imported as a parent-child structure:
+                                </p>
+                                <ul>
+                                    <li>
+                                        <strong>Parent Partner:</strong>
+                                        Contains bank accounts for all currencies
+                                    </li>
+                                    <li>
+                                        <strong>Child Partners:</strong>
+                                        One per currency, each with Bill.com ID
+                                    </li>
+                                    <li>
+                                        <strong>Manual Assignment:</strong>
+                                        Use "Parent Partner" field to assign an existing parent
+                                    </li>
+                                </ul>
+                            </div>
+                            <field name="duplicate_group_line_ids" nolabel="1">
+                                <tree
+                                    decoration-primary="is_duplicate_group==True"
+                                    editable="bottom"
+                                >
+                                    <field name="selected" widget="boolean_toggle" />
+                                    <field name="state" invisible="1" />
+                                    <field name="wizard_id" invisible="1" />
+                                    <field name="is_duplicate_group" invisible="1" />
+                                    <field name="billcom_ids_json" invisible="1" />
+                                    <field name="billcom_ids_count" string="# IDs" />
+                                    <field
+                                        name="match_details"
+                                        string="Group Details"
+                                    />
+                                    <field
+                                        name="billcom_partner_name"
+                                        string="Bill.com Name"
+                                    />
+
+                                    <!-- Manual parent assignment -->
+                                    <field
+                                        name="parent_partner_id"
+                                        string="Assign Parent"
+                                        context="{'default_supplier_rank': 1 if parent.partner_type == 'vendor' else 0, 'default_customer_rank': 1 if parent.partner_type == 'customer' else 0}"
+                                        options="{'no_create': True, 'no_quick_create': True}"
+                                    />
+
+                                    <!-- Matched partner (read-only, for reference) -->
+                                    <field
+                                        name="odoo_partner_id"
+                                        string="Suggested Match"
+                                        readonly="1"
+                                    />
+
+                                    <field name="action" />
+                                    <field name="error_message" optional="hide" />
+                                </tree>
+                            </field>
                         </page>
                     </notebook>
 
