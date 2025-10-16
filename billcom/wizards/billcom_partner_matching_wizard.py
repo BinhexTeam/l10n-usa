@@ -298,6 +298,54 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
                 _("No %ss found in Bill.com") % self.partner_type.capitalize()
             )
 
+        # Filter out Bill.com partners that are already linked to Odoo partners
+        _logger.info(
+            f"Filtering Bill.com partners that are already linked to Odoo partners..."
+        )
+
+        # Get all Bill.com IDs that already exist in Odoo
+        billcom_ids_in_odoo = set()
+        all_odoo_partners = self.env["res.partner"].search(
+            [
+                "|",
+                ("billcom_id", "!=", False),
+                ("billcom", "!=", False),
+            ]
+        )
+
+        for partner in all_odoo_partners:
+            if partner.billcom_id:
+                billcom_ids_in_odoo.add(partner.billcom_id)
+            if partner.billcom:
+                billcom_ids_in_odoo.add(partner.billcom)
+
+        _logger.info(
+            f"Found {len(billcom_ids_in_odoo)} Bill.com IDs already linked in Odoo"
+        )
+
+        # Filter Bill.com partners to exclude already linked ones
+        original_count = len(billcom_partners)
+        billcom_partners = [
+            bc_partner
+            for bc_partner in billcom_partners
+            if bc_partner["id"] not in billcom_ids_in_odoo
+        ]
+
+        filtered_count = original_count - len(billcom_partners)
+        _logger.info(
+            f"Filtered out {filtered_count} already linked partners. "
+            f"Remaining: {len(billcom_partners)} to process"
+        )
+
+        if not billcom_partners:
+            raise UserError(
+                _(
+                    "All %ss from Bill.com are already linked to Odoo partners. "
+                    "No new partners to match."
+                )
+                % self.partner_type
+            )
+
         # Group Bill.com partners to detect duplicates
         grouped_partners, duplicate_groups = self._group_billcom_duplicates(
             billcom_partners
@@ -363,44 +411,16 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
                 # Found matches - Select BEST match and create ONE line to link entire group
                 best_match = max(potential_matches, key=lambda m: m["score"])
 
-                # Check if any Bill.com ID from group is already linked to an Odoo partner
-                already_linked_partner = None
-                already_linked_ids = []
-                for bc_data in billcom_ids_data:
-                    existing = self.env["res.partner"].search(
-                        [
-                            "|",
-                            ("billcom_id", "=", bc_data["id"]),
-                            ("billcom", "=", bc_data["id"]),
-                        ],
-                        limit=1,
-                    )
-                    if existing:
-                        already_linked_partner = existing
-                        already_linked_ids.append(bc_data["id"])
-
-                # Determine action based on whether some IDs are already linked
-                if already_linked_partner:
-                    # Some IDs already linked - use that partner and complete the group
-                    action = "link"  # Will complete the group link
-                    confidence = "high"
-                    odoo_partner_id = already_linked_partner.id
-                    match_details = (
-                        f"Duplicate group: {len(partners)} Bill.com IDs, "
-                        f"{len(already_linked_ids)} already linked to '{already_linked_partner.name}' → "
-                        f"Complete group link"
-                    )
-                else:
-                    # No IDs linked yet - link all to best match
-                    action = (
-                        "link" if best_match["confidence_level"] == "high" else "review"
-                    )
-                    confidence = best_match["confidence_level"]
-                    odoo_partner_id = best_match["odoo_id"]
-                    match_details = (
-                        f"Duplicate group: {len(partners)} Bill.com IDs → "
-                        f"Link all to '{self.env['res.partner'].browse(best_match['odoo_id']).name}'"
-                    )
+                # Determine action - all IDs in this group are not yet linked (filtered earlier)
+                action = (
+                    "link" if best_match["confidence_level"] == "high" else "review"
+                )
+                confidence = best_match["confidence_level"]
+                odoo_partner_id = best_match["odoo_id"]
+                match_details = (
+                    f"Duplicate group: {len(partners)} Bill.com IDs → "
+                    f"Link all to '{self.env['res.partner'].browse(best_match['odoo_id']).name}'"
+                )
 
                 matching_lines.append(
                     {
@@ -423,7 +443,9 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
         for billcom_partner in billcom_partners:
             if billcom_partner["id"] in processed_billcom_ids:
                 continue  # Skip already processed duplicates
+
             # Find ALL potential Odoo matches for this Bill.com partner
+            # Note: Already linked partners were filtered out earlier
             potential_matches = self._find_odoo_matches(billcom_partner, odoo_partners)
 
             if not potential_matches:
