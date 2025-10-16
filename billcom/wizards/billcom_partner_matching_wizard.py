@@ -263,7 +263,7 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
                 )
 
                 # Build params with pagination
-                params = {"max": 100}
+                params = {"max": 100, "filters": "archived:eq:false"}
                 if next_page:
                     params["page"] = next_page
 

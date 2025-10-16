@@ -490,8 +490,9 @@ class BillcomPartnerMatchingLine(models.TransientModel):
 
                     # Create child partner
                     child_vals = {
-                        "name": f"{parent_partner.name} {currency_code}",
+                        "name": parent_partner.name,
                         "parent_id": parent_partner.id,
+                        "billcom_res_currency_id": currency.id,
                         "is_sync_to_billcom": True,
                         "billcom": bc_id,
                         "billcom_id": bc_id,
@@ -795,8 +796,9 @@ class BillcomPartnerMatchingLine(models.TransientModel):
 
                     # Child partner values
                     child_vals = {
-                        "name": f"{parent_partner.name} {currency_code}",
+                        "name": parent_partner.name,
                         "parent_id": parent_partner.id,
+                        "billcom_res_currency_id": currency.id,
                         "is_sync_to_billcom": True,
                         "billcom": bc_id,
                         "billcom_id": bc_id,
