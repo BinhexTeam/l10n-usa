@@ -1147,6 +1147,7 @@ class BillcomService(models.AbstractModel):
                         "invoice_date": bill_data.get("invoiceDate"),
                         "invoice_date_due": bill_data.get("dueDate"),
                         "ref": bill_data.get("invoiceNumber", ""),
+                        "invoice_origin": bill_data.get("purchaseOrderNumber", ""),
                         "billcom_invoice_number": bill_data.get("invoiceNumber", ""),
                         "billcom": bill_data["id"],
                         "last_sync_date": fields.Datetime.now(),
@@ -2056,6 +2057,7 @@ class BillcomService(models.AbstractModel):
         invoice_data = billcom_data.get("invoice", {})
         invoice_number = invoice_data.get("invoiceNumber", billcom_bill_id)
         invoice_date = invoice_data.get("invoiceDate")
+        invoice_origin = invoice_data.get("purchaseOrderNumber")
 
         # Get default vendor bill journal
         company = vendor.company_id or self.env.company
@@ -2080,6 +2082,7 @@ class BillcomService(models.AbstractModel):
             "ref": invoice_number,
             "billcom_invoice_number": invoice_number,
             "invoice_date": invoice_date,
+            "invoice_origin": invoice_origin,
             "invoice_date_due": billcom_data.get("dueDate"),
             "narration": billcom_data.get("description"),
             "billcom": billcom_bill_id,
@@ -2254,6 +2257,7 @@ class BillcomService(models.AbstractModel):
         # Extract invoice data - for invoices, data is at top level (not nested like bills)
         invoice_number = billcom_data.get("invoiceNumber", billcom_invoice_id)
         invoice_date = billcom_data.get("invoiceDate")
+        invoice_origin = billcom_data.get("purchaseOrderNumber")
 
         # Get default customer invoice journal
         company = customer.company_id or self.env.company
@@ -2276,6 +2280,7 @@ class BillcomService(models.AbstractModel):
             "partner_id": customer.id,
             "journal_id": journal.id,
             "ref": invoice_number,
+            "invoice_origin": invoice_origin,
             "billcom_invoice_number": invoice_number,
             "invoice_date": invoice_date,
             "invoice_date_due": billcom_data.get("dueDate"),

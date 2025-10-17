@@ -245,6 +245,22 @@ class BillcomPartnerMatchingLine(models.TransientModel):
                     else "person",
                 }
 
+                # Capture and set Bill.com currency
+                bill_currency = billcom_data.get("billCurrency", "USD")
+                currency = self.env["res.currency"].search(
+                    [("name", "=", bill_currency)], limit=1
+                )
+                if currency:
+                    vals["billcom_res_currency_id"] = currency.id
+                    _logger.info(
+                        f"Set currency {bill_currency} for partner {billcom_data.get('name')}"
+                    )
+                else:
+                    _logger.warning(
+                        f"Currency {bill_currency} not found in Odoo for partner {billcom_data.get('name')}, "
+                        f"will use default currency"
+                    )
+
                 # Set supplier or customer rank
                 if partner_type == "vendor":
                     vals["supplier_rank"] = 1
@@ -991,6 +1007,22 @@ class BillcomPartnerMatchingLine(models.TransientModel):
                     if billcom_data.get("accountType") == "BUSINESS"
                     else "person",
                 }
+
+                # Capture and set Bill.com currency
+                bill_currency = billcom_data.get("billCurrency", "USD")
+                currency = self.env["res.currency"].search(
+                    [("name", "=", bill_currency)], limit=1
+                )
+                if currency:
+                    vals["billcom_res_currency_id"] = currency.id
+                    _logger.info(
+                        f"Set currency {bill_currency} for new partner {billcom_data.get('name')}"
+                    )
+                else:
+                    _logger.warning(
+                        f"Currency {bill_currency} not found in Odoo for new partner {billcom_data.get('name')}, "
+                        f"will use default currency"
+                    )
 
                 # Set supplier or customer rank
                 if partner_type == "vendor":

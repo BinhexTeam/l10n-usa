@@ -890,3 +890,70 @@ class BillcomPartnerMatchingWizard(models.TransientModel):
             "res_id": self.id,
             "target": "new",
         }
+
+    def action_reset_all_billcom_ids(self):
+        """Reset billcom and billcom_id fields for all partners
+
+        This allows re-running the matching wizard from scratch.
+        Useful when:
+        - Testing the matching process
+        - Re-syncing all partners from Bill.com
+        - Fixing incorrect matches
+
+        Returns:
+            dict: Notification action to display success message
+        """
+        self.ensure_one()
+
+        Partner = self.env["res.partner"]
+
+        # Find all partners with Bill.com IDs
+        partners_with_billcom = Partner.search(
+            [
+                "|",
+                ("billcom_id", "!=", False),
+                ("billcom", "!=", False),
+            ]
+        )
+
+        if not partners_with_billcom:
+            raise UserError(_("No partners found with Bill.com IDs to reset."))
+
+        partner_count = len(partners_with_billcom)
+        _logger.warning(
+            f"⚠️  RESETTING Bill.com IDs for {partner_count} partners - "
+            f"This will allow re-matching all partners"
+        )
+
+        # Reset both fields and sync status
+        partners_with_billcom.write(
+            {
+                "billcom": False,
+                "billcom_id": False,
+                "billcom_sync_status": "not_synced",
+                "last_sync_date": False,
+            }
+        )
+
+        _logger.info(
+            f"✓ Successfully reset Bill.com IDs for {partner_count} partners"
+        )
+
+        # Also reset wizard state
+        self.line_ids.unlink()
+        self.state = "draft"
+
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Reset Complete"),
+                "message": _(
+                    "Successfully reset Bill.com IDs for %d partners. "
+                    "You can now run the matching wizard again."
+                )
+                % partner_count,
+                "type": "success",
+                "sticky": False,
+            },
+        }

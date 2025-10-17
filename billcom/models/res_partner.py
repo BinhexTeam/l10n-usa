@@ -13,10 +13,7 @@ class ResPartner(models.Model):
     billcom_res_currency_id = fields.Many2one(
         "res.currency",
         string="Bill.com Currency",
-        help="Currency for Bill.com transactions",
-        compute="_compute_billcom_currency_id",
-        store=True,
-        readonly=False,
+        default=lambda self: self.env.company.currency_id,
     )
 
     billcom_sync_state = fields.Selection(
@@ -35,15 +32,6 @@ class ResPartner(models.Model):
         help="Payment purpose for international vendors (non-US) in Bill.com",
         domain="[('country_id', '=', country_id)]",
     )
-
-    @api.depends("country_id")
-    def _compute_billcom_currency_id(self):
-        """Compute the currency to use for Bill.com transactions"""
-        for partner in self:
-            if partner.country_id:
-                partner.billcom_res_currency_id = partner.country_id.currency_id.id
-            else:
-                partner.billcom_res_currency_id = self.env.company.currency_id.id
 
     def _prepare_partner_data(self, partner_type="vendor"):
         """Prepare partner data for Bill.com API v3"""

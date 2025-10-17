@@ -16,9 +16,10 @@
                 <field name="selected" widget="boolean_toggle" />
                 <field name="state" invisible="1" />
                 <field name="confidence_color" invisible="1" />
-                <field name="confidence_level" />
-                <field name="match_score" />
-                <field name="match_details" />
+                <field name="confidence_level" optional="hide"/>
+                <field name="match_score" optional="hide"/>
+                <field name="match_details" optional="hide"/>
+                <field name="odoo_partner_id" optional="hide"/>
                 <field name="odoo_partner_name" />
                 <field name="odoo_partner_email" />
                 <field name="odoo_partner_phone" />
@@ -56,6 +57,14 @@
                         string="Start Over"
                         type="object"
                         attrs="{'invisible': [('state', '=', 'draft')]}"
+                    />
+                    <button
+                        name="action_reset_all_billcom_ids"
+                        string="Reset All Bill.com IDs"
+                        type="object"
+                        class="btn-danger"
+                        confirm="⚠️  WARNING: This will remove ALL Bill.com IDs from ALL partners in the system. This action cannot be undone. Are you absolutely sure you want to continue?"
+                        groups="base.group_system"
                     />
                     <field
                         name="state"

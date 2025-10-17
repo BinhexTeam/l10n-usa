@@ -71,6 +71,7 @@ class AccountMove(models.Model):
             "billLineItems": lines,
             "invoice": {
                 "invoiceNumber": self.billcom_invoice_number or self.name or "",
+                "purchaseOrderNumber": self.invoice_origin or "",
                 "invoiceDate": self.invoice_date.isoformat()
                 if self.invoice_date
                 else "",
@@ -841,6 +842,7 @@ class AccountMove(models.Model):
                 "billcom": billcom_id,
                 "billcom_status": document_data.get("paymentStatus"),
                 "ref": invoice_info.get("invoiceNumber", ""),
+                "invoice_origin": invoice_info.get("purchaseOrderNumber", ""),
                 "invoice_date": invoice_info.get("invoiceDate"),
                 "invoice_date_due": document_data.get("dueDate"),
                 "last_sync_date": fields.Datetime.now(),
