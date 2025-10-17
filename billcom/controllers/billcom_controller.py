@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import json
@@ -17,15 +18,68 @@ class BillComController(http.Controller):
         return {"success": False, "error": str(error)}
 
     def _validate_webhook_signature(self, payload, signature, secret):
-        """Validate webhook signature from Bill.com"""
+        """Validate webhook signature from Bill.com
+
+        Bill.com signature validation process:
+        1. HMAC-SHA256 hash of minified JSON payload
+        2. Encode hash as base64 (NOT hexadecimal)
+        3. Compare with x-bill-sha-signature header
+
+        Reference: https://developer.bill.com/docs/test-with-webhook-security
+
+        Args:
+            payload (bytes): Raw webhook payload (minified JSON)
+            signature (str): Value from x-bill-sha-signature header
+            secret (str): securityKey from subscription response
+
+        Returns:
+            bool: True if signature is valid, False otherwise
+        """
         if not secret:
+            _logger.warning(
+                "No webhook secret configured - skipping signature validation. "
+                "Configure webhook_secret in Bill.com settings for security."
+            )
             return True
+
         if not signature:
+            _logger.error("Missing x-bill-sha-signature header in webhook request")
             return False
-        if signature.startswith("sha256="):
-            signature = signature[7:]
-        expected = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, signature)
+
+        try:
+            # Ensure payload is bytes
+            if isinstance(payload, str):
+                payload = payload.encode("utf-8")
+
+            # Compute HMAC-SHA256 hash and encode as base64
+            hash_digest = hmac.new(
+                secret.encode("utf-8"), payload, hashlib.sha256
+            ).digest()
+
+            expected_signature = base64.b64encode(hash_digest).decode("utf-8")
+
+            # Secure comparison
+            is_valid = hmac.compare_digest(expected_signature, signature)
+
+            if not is_valid:
+                _logger.error(
+                    "⚠️  Webhook signature validation FAILED!\n"
+                    "Expected (base64): %s...\n"
+                    "Received: %s...\n"
+                    "This may indicate a security issue or incorrect webhook_secret configuration.",
+                    expected_signature[:30],
+                    signature[:30],
+                )
+            else:
+                _logger.info("✓ Webhook signature validated successfully")
+
+            return is_valid
+
+        except Exception as e:
+            _logger.error(
+                "Error validating webhook signature: %s", str(e), exc_info=True
+            )
+            return False
 
     def _get_config_from_organization_id(self, organization_id):
         """Get Bill.com configuration by organization ID from webhook metadata"""

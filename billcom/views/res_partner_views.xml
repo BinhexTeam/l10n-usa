@@ -67,7 +67,6 @@
                         >
                             <field
                                 name="billcom_id"
-                                readonly="1"
                                 attrs="{'readonly': [('billcom_sync_manual', '=', False)], 'invisible': [('billcom_id', '=', False),('billcom_sync_manual', '=', False)]}"
                             />
                             <field
